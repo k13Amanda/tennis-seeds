@@ -1067,7 +1067,7 @@ function showPreview() {
 // Confirm / Cancel Import
 // ------------------------------
 document.getElementById("confirmImportBtn").addEventListener("click", () => {
-  pendingImportMatches.forEach(m => saveImportedMatch(m));
+  saveImportedMatches(pendingImportMatches);
   alert("Import complete!");
   document.getElementById("importPreview").style.display = "none";
   renderAll(); // refresh standings + list
@@ -1132,43 +1132,53 @@ function formatImportedDate(value) {
 // Save Imported Match
 // ------------------------------
 
-function saveImportedMatch(m) {
+function saveImportedMatches(importList) {
   const stored = JSON.parse(localStorage.getItem(STORAGE_KEY)) || [];
+  const grouped = {};
 
-  const result = {
-    spotId: m.spotID,
-    dnp: m.dnp,
-    defaultA: m.defaultA,
-    defaultB: m.defaultB,
-    gamesA: m.dnp ? null : m.scoreA,
-    gamesB: m.dnp ? null : m.scoreB,
-    winner: null,
-    loser: null
-  };
+  importList.forEach(m => {
+    const key = `${m.date}__${m.teamA}__${m.teamB}`;
 
-  if (m.dnp) {
-    // no winner or loser
-  } else if (m.defaultA) {
-    result.winner = m.teamB;
-    result.loser = m.teamA;
-  } else if (m.defaultB) {
-    result.winner = m.teamA;
-    result.loser = m.teamB;
-  } else {
-    result.winner = m.scoreA > m.scoreB ? m.teamA : m.teamB;
-    result.loser = m.scoreA > m.scoreB ? m.teamB : m.teamA;
-  }
+    if (!grouped[key]) {
+      grouped[key] = {
+        id: Date.now() + Math.random(),
+        division: currentDivision,
+        date: m.date,
+        teamA: m.teamA,
+        teamB: m.teamB,
+        spots: {}
+      };
+    }
 
-  const newMatch = {
-    id: Date.now() + Math.random(),
-    division: currentDivision,
-    date: m.date,
-    teamA: m.teamA,
-    teamB: m.teamB,
-    spots: { [m.spotID]: result }
-  };
+    const result = {
+      spotId: m.spotID,
+      dnp: m.dnp,
+      defaultA: m.defaultA,
+      defaultB: m.defaultB,
+      gamesA: m.dnp ? null : m.scoreA,
+      gamesB: m.dnp ? null : m.scoreB,
+      winner: null,
+      loser: null
+    };
 
-  stored.push(newMatch);
+    if (m.dnp) {
+      // no winner or loser
+    } else if (m.defaultA) {
+      result.winner = m.teamB;
+      result.loser = m.teamA;
+    } else if (m.defaultB) {
+      result.winner = m.teamA;
+      result.loser = m.teamB;
+    } else {
+      result.winner = m.scoreA > m.scoreB ? m.teamA : m.teamB;
+      result.loser = m.scoreA > m.scoreB ? m.teamB : m.teamA;
+    }
+
+    grouped[key].spots[m.spotID] = result;
+  });
+
+  Object.values(grouped).forEach(match => stored.push(match));
+
   localStorage.setItem(STORAGE_KEY, JSON.stringify(stored));
   matches = stored;
 }
