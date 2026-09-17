@@ -1,6 +1,11 @@
 // --------------------------------------------------
 // CONFIG — DIVISIONS + TEAMS
 // --------------------------------------------------
+console.log("APP.JS LOADED");
+
+
+
+let pendingImportMatches = [];
 
 const divisions = {
   "MS Boys": [
@@ -58,34 +63,29 @@ const divisionFormats = {
 // --------------------------------------------------
 
 const spotDefinitions = {
-  // MS Varsity
   "V1S": { label: "Varsity 1st Singles", level: "varsity", targetGames: 8 },
   "V2S": { label: "Varsity 2nd Singles", level: "varsity", targetGames: 8 },
   "V1D": { label: "Varsity 1st Doubles", level: "varsity", targetGames: 8 },
   "V2D": { label: "Varsity 2nd Doubles", level: "varsity", targetGames: 8 },
   "V3D": { label: "Varsity 3rd Doubles", level: "varsity", targetGames: 8 },
 
-  // MS JV
   "J1S": { label: "JV 1st Singles", level: "jv", targetGames: 6 },
   "J2S": { label: "JV 2nd Singles", level: "jv", targetGames: 6 },
   "J1D": { label: "JV 1st Doubles", level: "jv", targetGames: 6 },
   "J2D": { label: "JV 2nd Doubles", level: "jv", targetGames: 6 },
   "J3D": { label: "JV 3rd Doubles", level: "jv", targetGames: 6 },
 
-  // Orange Ball Varsity
   "OB1S": { label: "Varsity 1st Singles", level: "varsity", targetGames: 6 },
   "OB2S": { label: "Varsity 2nd Singles", level: "varsity", targetGames: 6 },
   "OB1D": { label: "Varsity 1st Doubles", level: "varsity", targetGames: 6 },
   "OB2D": { label: "Varsity 2nd Doubles", level: "varsity", targetGames: 6 },
   "OB3D": { label: "Varsity 3rd Doubles", level: "varsity", targetGames: 6 },
 
-  // Orange Ball JV
   "OBJ1D": { label: "JV 1st Doubles", level: "jv", targetGames: 6 },
   "OBJ2D": { label: "JV 2nd Doubles", level: "jv", targetGames: 6 },
   "OBJ3D": { label: "JV 3rd Doubles", level: "jv", targetGames: 6 },
   "OBJ4D": { label: "JV 4th Doubles", level: "jv", targetGames: 6 },
 
-  // High School Varsity Singles
   "HS1S": { label: "Varsity 1st Singles", level: "varsity", targetGames: 8 },
   "HS2S": { label: "Varsity 2nd Singles", level: "varsity", targetGames: 8 },
   "HS3S": { label: "Varsity 3rd Singles", level: "varsity", targetGames: 8 },
@@ -93,7 +93,6 @@ const spotDefinitions = {
   "HS5S": { label: "Varsity 5th Singles", level: "varsity", targetGames: 8 },
   "HS6S": { label: "Varsity 6th Singles", level: "varsity", targetGames: 8 },
 
-  // High School JV Singles
   "HSJ1S": { label: "JV 1st Singles", level: "jv", targetGames: 8 },
   "HSJ2S": { label: "JV 2nd Singles", level: "jv", targetGames: 8 },
   "HSJ3S": { label: "JV 3rd Singles", level: "jv", targetGames: 8 },
@@ -101,12 +100,10 @@ const spotDefinitions = {
   "HSJ5S": { label: "JV 5th Singles", level: "jv", targetGames: 8 },
   "HSJ6S": { label: "JV 6th Singles", level: "jv", targetGames: 8 },
 
-  // High School Varsity Doubles
   "HS1D": { label: "Varsity 1st Doubles", level: "varsity", targetGames: 8 },
   "HS2D": { label: "Varsity 2nd Doubles", level: "varsity", targetGames: 8 },
   "HS3D": { label: "Varsity 3rd Doubles", level: "varsity", targetGames: 8 },
 
-  // High School JV Doubles
   "HSJ1D": { label: "JV 1st Doubles", level: "jv", targetGames: 8 },
   "HSJ2D": { label: "JV 2nd Doubles", level: "jv", targetGames: 8 },
   "HSJ3D": { label: "JV 3rd Doubles", level: "jv", targetGames: 8 }
@@ -203,7 +200,7 @@ function loadTeamsForDivision(division) {
 }
 
 // --------------------------------------------------
-// RENDER SPOT INPUTS (BY DIVISION FORMAT)
+// RENDER SPOT INPUTS
 // --------------------------------------------------
 
 function renderSpotInputs() {
@@ -427,6 +424,8 @@ function onEditMatch(matchId) {
   document.getElementById("saveMatchBtn").textContent = "Save Edited Match";
 }
 
+
+
 function loadMatchIntoForm(match) {
   document.getElementById("matchDate").value = match.date;
   document.getElementById("teamASelect").value = match.teamA;
@@ -435,6 +434,8 @@ function loadMatchIntoForm(match) {
   divisionFormats[currentDivision].forEach(spotId => {
     const card = document.querySelector(`.spot-card[data-spot-id="${spotId}"]`);
     const res = match.spots[spotId];
+
+    if (!card || !res) return;
 
     const gamesAInput = card.querySelector('input[data-role="gamesA"]');
     const gamesBInput = card.querySelector('input[data-role="gamesB"]');
@@ -450,6 +451,7 @@ function loadMatchIntoForm(match) {
     defBCb.checked = res.defaultB;
   });
 }
+
 
 function saveEditedMatch() {
   const date = document.getElementById("matchDate").value || "";
@@ -882,4 +884,269 @@ function renderAll() {
   renderMatchesList();
   const standingsBySpot = computeStandingsBySpot();
   renderSeeds(standingsBySpot);
+}
+
+
+// ======================================================
+// ===== EXCEL IMPORT + PREVIEW WINDOW SECTION =====
+// ======================================================
+
+// ------------------------------
+// Excel Upload Handler
+// ------------------------------
+document.getElementById("importExcelBtn").addEventListener("click", () => {
+  const fileInput = document.getElementById("excelUpload");
+  const file = fileInput.files[0];
+
+  if (!file) {
+    alert("Please select an Excel file first.");
+    return;
+  }
+
+  const reader = new FileReader();
+
+  reader.onload = function (e) {
+    const data = new Uint8Array(e.target.result);
+    const workbook = XLSX.read(data, { type: "array" });
+
+    const sheetName = workbook.SheetNames[0];
+    const sheet = workbook.Sheets[sheetName];
+
+    const json = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+
+    importLeagueSheet(json);
+  };
+
+  reader.readAsArrayBuffer(file);
+});
+
+
+// ------------------------------
+// League Importer (Builds Preview List)
+// ------------------------------
+function importLeagueSheet(grid) {
+  console.log("RAW GRID:", grid);
+
+
+  pendingImportMatches = [];
+
+  const datesRow = grid[0];
+  const teamARow = grid[1];
+  const teamBRow = grid[grid.length - 1];
+  const spotRows = grid.slice(2, grid.length - 1);
+
+  for (let col = 1; col < datesRow.length; col++) {
+    const date = datesRow[col];
+    const teamA = teamARow[col];
+    const teamB = teamBRow[col];
+
+    if (!date || !teamA || !teamB) continue;
+
+    for (let r = 0; r < spotRows.length; r++) {
+      const row = spotRows[r];
+      const spotName = row[0];
+      const score = row[col];
+
+      if (!spotName) continue;
+
+      const spotID = mapSpotNameToID(spotName);
+      if (!spotID) continue;
+
+      // Handle DNP
+      if (String(score).trim().toUpperCase() === "DNP") {
+        pendingImportMatches.push({
+          date,
+          teamA,
+          teamB,
+          spotID,
+          dnp: true,
+          defaultA: false,
+          defaultB: false,
+          scoreA: null,
+          scoreB: null,
+          rawScore: "DNP"
+        });
+        continue;
+      }
+
+      // Handle defaults
+      const lower = String(score).toLowerCase();
+      if (lower.includes("default")) {
+        const defaultA = lower.includes("default a");
+        const defaultB = lower.includes("default b");
+
+        pendingImportMatches.push({
+          date,
+          teamA,
+          teamB,
+          spotID,
+          dnp: false,
+          defaultA,
+          defaultB,
+          scoreA: 0,
+          scoreB: 0,
+          rawScore: score
+        });
+        continue;
+      }
+
+      // Normal score
+      const parsed = parseScore(score);
+      if (!parsed) continue;
+
+      pendingImportMatches.push({
+        date,
+        teamA,
+        teamB,
+        spotID,
+        dnp: false,
+        defaultA: false,
+        defaultB: false,
+        scoreA: parsed.a,
+        scoreB: parsed.b,
+        rawScore: score
+      });
+    }
+  }
+
+  showPreview();
+}
+
+
+
+// ------------------------------
+// Preview Window Renderer
+// ------------------------------
+function showPreview() {
+  const previewDiv = document.getElementById("importPreview");
+  const content = document.getElementById("previewContent");
+
+  previewDiv.style.display = "block";
+  content.innerHTML = "";
+
+  if (pendingImportMatches.length === 0) {
+    content.innerHTML = "<p style='color:red;'>No matches detected.</p>";
+    return;
+  }
+
+  let currentMatchKey = "";
+
+  pendingImportMatches.forEach(m => {
+    const matchKey = `${m.date} — ${m.teamA} vs ${m.teamB}`;
+
+    if (matchKey !== currentMatchKey) {
+      currentMatchKey = matchKey;
+      content.innerHTML += `<h3>${matchKey}</h3>`;
+    }
+
+    if (m.dnp) {
+      content.innerHTML += `${m.spotID}: DNP<br>`;
+    } else if (m.defaultA) {
+      content.innerHTML += `${m.spotID}: Team A Defaulted<br>`;
+    } else if (m.defaultB) {
+      content.innerHTML += `${m.spotID}: Team B Defaulted<br>`;
+    } else {
+      content.innerHTML += `${m.spotID}: ${m.scoreA}-${m.scoreB}<br>`;
+    }
+  });
+}
+
+
+
+// ------------------------------
+// Confirm / Cancel Import
+// ------------------------------
+document.getElementById("confirmImportBtn").addEventListener("click", () => {
+  pendingImportMatches.forEach(m => saveImportedMatch(m));
+  alert("Import complete!");
+  document.getElementById("importPreview").style.display = "none";
+  renderAll(); // refresh standings + list
+});
+
+document.getElementById("cancelImportBtn").addEventListener("click", () => {
+  pendingImportMatches = [];
+  document.getElementById("importPreview").style.display = "none";
+});
+
+
+// ------------------------------
+// Spot Name → Spot ID Mapper
+// ------------------------------
+function mapSpotNameToID(name) {
+  const map = {
+    "Varsity 1st Singles": "V1S",
+    "Varsity 2nd Singles": "V2S",
+    "Varsity 1st Doubles": "V1D",
+    "Varsity 2nd Doubles": "V2D",
+    "Varsity 3rd Doubles": "V3D",
+    "JV 1st Singles": "J1S",
+    "JV 2nd Singles": "J2S",
+    "JV 1st Doubles": "J1D",
+    "JV 2nd Doubles": "J2D",
+    "JV 3rd Doubles": "J3D"
+  };
+
+  return map[name] || null;
+}
+
+
+// ------------------------------
+// Score Parser (A-B format)
+// ------------------------------
+function parseScore(score) {
+  const parts = String(score).split("-");
+  if (parts.length !== 2) return null;
+
+  const a = parseInt(parts[0].trim(), 10);
+  const b = parseInt(parts[1].trim(), 10);
+
+  if (Number.isNaN(a) || Number.isNaN(b)) return null;
+
+  return { a, b };
+}
+
+
+// ------------------------------
+// Save Imported Match
+// ------------------------------
+
+function saveImportedMatch(m) {
+  const stored = JSON.parse(localStorage.getItem(STORAGE_KEY)) || [];
+
+  const result = {
+    spotId: m.spotID,
+    dnp: m.dnp,
+    defaultA: m.defaultA,
+    defaultB: m.defaultB,
+    gamesA: m.dnp ? null : m.scoreA,
+    gamesB: m.dnp ? null : m.scoreB,
+    winner: null,
+    loser: null
+  };
+
+  if (m.dnp) {
+    // no winner or loser
+  } else if (m.defaultA) {
+    result.winner = m.teamB;
+    result.loser = m.teamA;
+  } else if (m.defaultB) {
+    result.winner = m.teamA;
+    result.loser = m.teamB;
+  } else {
+    result.winner = m.scoreA > m.scoreB ? m.teamA : m.teamB;
+    result.loser = m.scoreA > m.scoreB ? m.teamB : m.teamA;
+  }
+
+  const newMatch = {
+    id: Date.now() + Math.random(),
+    division: currentDivision,
+    date: m.date,
+    teamA: m.teamA,
+    teamB: m.teamB,
+    spots: { [m.spotID]: result }
+  };
+
+  stored.push(newMatch);
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(stored));
+  matches = stored;
 }

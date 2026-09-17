@@ -5,6 +5,9 @@
     <meta charset="UTF-8">
     <title>Tennis Scheduler</title>
     <link rel="stylesheet" href="styles.css">
+
+    <!-- Load LOCAL XLSX library (no CDN, no blocking) -->
+    <script src="xlsx.full.min.js"></script>
 </head>
 
 <body>
@@ -43,6 +46,18 @@
             </div>
         </section>
 
+        <!-- Excel Import -->
+        <input type="file" id="excelUpload" accept=".xlsx,.xls" />
+        <button id="importExcelBtn">Import Excel</button>
+
+        <!-- Preview Window -->
+        <div id="importPreview" style="display:none; padding:20px; border:2px solid #444; margin-top:20px;">
+            <h2>Preview Import</h2>
+            <div id="previewContent"></div>
+            <button id="confirmImportBtn">Confirm Import</button>
+            <button id="cancelImportBtn">Cancel</button>
+        </div>
+
         <!-- Varsity Section -->
         <section class="card">
             <h2>Varsity</h2>
@@ -78,6 +93,7 @@
         </section>
     </main>
 
+    <!-- Your main JS file -->
     <script src="app.js"></script>
 </body>
 
