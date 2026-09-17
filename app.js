@@ -907,7 +907,7 @@ document.getElementById("importExcelBtn").addEventListener("click", () => {
 
   reader.onload = function (e) {
     const data = new Uint8Array(e.target.result);
-    const workbook = XLSX.read(data, { type: "array" });
+    const workbook = XLSX.read(data, { type: "array", cellDates: true });
 
     const sheetName = workbook.SheetNames[0];
     const sheet = workbook.Sheets[sheetName];
@@ -946,9 +946,8 @@ function importLeagueSheet(rawGrid) {
   const teamBRow = grid[grid.length - 1];
   const spotRows = grid.slice(2, grid.length - 1);
 
-
   for (let col = 1; col < datesRow.length; col++) {
-    const date = datesRow[col];
+    const date = formatImportedDate(datesRow[col]);
     const teamA = teamARow[col];
     const teamB = teamBRow[col];
 
@@ -1023,7 +1022,6 @@ function importLeagueSheet(rawGrid) {
 
   showPreview();
 }
-
 
 
 // ------------------------------
@@ -1117,6 +1115,18 @@ function parseScore(score) {
   return { a, b };
 }
 
+
+// added this function here
+
+function formatImportedDate(value) {
+  if (value instanceof Date && !isNaN(value)) {
+    const mm = String(value.getMonth() + 1).padStart(2, "0");
+    const dd = String(value.getDate()).padStart(2, "0");
+    const yyyy = value.getFullYear();
+    return `${mm}/${dd}/${yyyy}`;
+  }
+  return value; // fallback: leave as-is if it wasn't parsed as a Date
+}
 
 // ------------------------------
 // Save Imported Match
