@@ -924,16 +924,28 @@ document.getElementById("importExcelBtn").addEventListener("click", () => {
 // ------------------------------
 // League Importer (Builds Preview List)
 // ------------------------------
-function importLeagueSheet(grid) {
-  console.log("RAW GRID:", grid);
+function importLeagueSheet(rawGrid) {
+  console.log("RAW GRID:", rawGrid);
 
+  // Drop fully-blank rows (common when Excel formatting extends past the real data)
+  const grid = rawGrid.filter(row =>
+    row && row.some(cell => cell !== undefined && String(cell).trim() !== "")
+  );
+
+  console.log("CLEANED GRID:", grid);
 
   pendingImportMatches = [];
+
+  if (grid.length < 3) {
+    alert("Couldn't find enough rows in the sheet — need at least a date row, one spot row, and a team row.");
+    return;
+  }
 
   const datesRow = grid[0];
   const teamARow = grid[1];
   const teamBRow = grid[grid.length - 1];
   const spotRows = grid.slice(2, grid.length - 1);
+
 
   for (let col = 1; col < datesRow.length; col++) {
     const date = datesRow[col];
