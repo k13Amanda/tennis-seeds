@@ -3,8 +3,6 @@
 // --------------------------------------------------
 console.log("APP.JS LOADED");
 
-
-
 let pendingImportMatches = [];
 
 const divisions = {
@@ -424,8 +422,6 @@ function onEditMatch(matchId) {
   document.getElementById("saveMatchBtn").textContent = "Save Edited Match";
 }
 
-
-
 function loadMatchIntoForm(match) {
   document.getElementById("matchDate").value = match.date;
   document.getElementById("teamASelect").value = match.teamA;
@@ -451,7 +447,6 @@ function loadMatchIntoForm(match) {
     defBCb.checked = res.defaultB;
   });
 }
-
 
 function saveEditedMatch() {
   const date = document.getElementById("matchDate").value || "";
@@ -747,7 +742,7 @@ function renderSeeds(standingsBySpot) {
       t.gameDiff = t.gamesWon - t.gamesLost;
     });
 
-    const sorted = activeTeams.slice().sort((a, b) => compareTeamsWithTiebreaks(a, b));
+    const { ordered: sorted, trueTies } = sortTeamsWithTiebreaks(activeTeams);
 
     const wrapper = document.createElement("div");
     wrapper.className = "table-wrapper";
@@ -810,7 +805,7 @@ function renderSeeds(standingsBySpot) {
     tbl.appendChild(tbody);
     wrapper.appendChild(tbl);
 
-    const tieNote = detectTrueTies(sorted);
+    const tieNote = formatTrueTies(trueTies);
     if (tieNote) {
       const noteDiv = document.createElement("div");
       noteDiv.className = "tie-note";
@@ -826,48 +821,91 @@ function renderSeeds(standingsBySpot) {
   });
 }
 
-function compareTeamsWithTiebreaks(a, b) {
-  if (b.winPct !== a.winPct) return b.winPct - a.winPct;
+// --------------------------------------------------
+// TIE BREAK RULES
+// --------------------------------------------------
 
-  const h2hA = a.headToHead[b.team] || { wins: 0, losses: 0 };
-  const h2hB = b.headToHead[a.team] || { wins: 0, losses: 0 };
+function groupByWinPct(teams) {
+  const sorted = teams.slice().sort((a, b) => b.winPct - a.winPct);
+  const groups = [];
+  let currentGroup = [];
+  let currentPct = null;
 
-  const aH2HNet = h2hA.wins - h2hA.losses;
-  const bH2HNet = h2hB.wins - h2hB.losses;
+  sorted.forEach(t => {
+    if (currentPct === null || Math.abs(t.winPct - currentPct) < 1e-9) {
+      currentGroup.push(t);
+      currentPct = t.winPct;
+    } else {
+      groups.push(currentGroup);
+      currentGroup = [t];
+      currentPct = t.winPct;
+    }
+  });
 
-  if (aH2HNet !== bH2HNet) return bH2HNet - aH2HNet;
-
-  if (b.gameDiff !== a.gameDiff) return b.gameDiff - a.gameDiff;
-
-  if (b.gamesWon !== a.gamesWon) return b.gamesWon - a.gamesWon;
-
-  return 0;
+  if (currentGroup.length) groups.push(currentGroup);
+  return groups;
 }
 
-function detectTrueTies(sorted) {
-  if (sorted.length < 2) return "";
+function resolveGroupTiebreak(group) {
+  const groupNames = new Set(group.map(t => t.team));
+
+  group.forEach(t => {
+    let rrWins = 0;
+    let rrLosses = 0;
+
+    groupNames.forEach(opp => {
+      if (opp === t.team) return;
+      const h2h = t.headToHead[opp];
+      if (h2h) {
+        rrWins += h2h.wins;
+        rrLosses += h2h.losses;
+      }
+    });
+
+    t.rrWins = rrWins;
+    t.rrLosses = rrLosses;
+    t.rrNet = rrWins - rrLosses;
+  });
+
+  const sorted = group.slice().sort((a, b) => {
+    if (b.rrNet !== a.rrNet) return b.rrNet - a.rrNet;
+    if (b.gameDiff !== a.gameDiff) return b.gameDiff - a.gameDiff;
+    if (b.gamesWon !== a.gamesWon) return b.gamesWon - a.gamesWon;
+    return 0;
+  });
 
   const ties = [];
-
   for (let i = 0; i < sorted.length - 1; i++) {
     const a = sorted[i];
     const b = sorted[i + 1];
-
-    const sameWinPct = a.winPct === b.winPct;
-
-    const h2hA = a.headToHead[b.team] || { wins: 0, losses: 0 };
-    const h2hB = b.headToHead[a.team] || { wins: 0, losses: 0 };
-
-    const sameH2H = (h2hA.wins - h2hA.losses) === (h2hB.wins - h2hB.losses);
-    const sameGameDiff = a.gameDiff === b.gameDiff;
-    const sameGamesWon = a.gamesWon === b.gamesWon;
-
-    if (sameWinPct && sameH2H && sameGameDiff && sameGamesWon) {
+    if (a.rrNet === b.rrNet && a.gameDiff === b.gameDiff && a.gamesWon === b.gamesWon) {
       ties.push([a.team, b.team]);
     }
   }
 
-  if (ties.length === 0) return "";
+  return { ordered: sorted, ties };
+}
+
+function sortTeamsWithTiebreaks(teams) {
+  const groups = groupByWinPct(teams);
+  let finalOrder = [];
+  let allTies = [];
+
+  groups.forEach(group => {
+    if (group.length === 1) {
+      finalOrder.push(group[0]);
+      return;
+    }
+    const { ordered, ties } = resolveGroupTiebreak(group);
+    finalOrder = finalOrder.concat(ordered);
+    allTies = allTies.concat(ties);
+  });
+
+  return { ordered: finalOrder, trueTies: allTies };
+}
+
+function formatTrueTies(ties) {
+  if (!ties || ties.length === 0) return "";
 
   const uniqueTeams = new Set();
   ties.forEach(pair => pair.forEach(t => uniqueTeams.add(t)));
@@ -886,13 +924,12 @@ function renderAll() {
   renderSeeds(standingsBySpot);
 }
 
-
 // ======================================================
 // ===== EXCEL IMPORT + PREVIEW WINDOW SECTION =====
 // ======================================================
 
 // ------------------------------
-// Excel Upload Handler
+// Excel Upload Handler (multi-sheet: one tab per division)
 // ------------------------------
 document.getElementById("importExcelBtn").addEventListener("click", () => {
   const fileInput = document.getElementById("excelUpload");
@@ -909,36 +946,59 @@ document.getElementById("importExcelBtn").addEventListener("click", () => {
     const data = new Uint8Array(e.target.result);
     const workbook = XLSX.read(data, { type: "array", cellDates: true });
 
-    const sheetName = workbook.SheetNames[0];
-    const sheet = workbook.Sheets[sheetName];
+    pendingImportMatches = [];
+    const skippedSheets = [];
 
-    const json = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+    workbook.SheetNames.forEach(sheetName => {
+      const division = matchSheetNameToDivision(sheetName);
 
-    importLeagueSheet(json);
+      if (!division) {
+        skippedSheets.push(sheetName);
+        return;
+      }
+
+      const sheet = workbook.Sheets[sheetName];
+      const json = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+
+      const sheetMatches = parseLeagueSheet(json, division);
+      pendingImportMatches = pendingImportMatches.concat(sheetMatches);
+    });
+
+    if (skippedSheets.length > 0) {
+      console.warn("Skipped sheets (tab name didn't match a division):", skippedSheets);
+    }
+
+    showPreview();
   };
 
   reader.readAsArrayBuffer(file);
 });
 
+// ------------------------------
+// Sheet Tab Name → Division Matcher
+// ------------------------------
+function matchSheetNameToDivision(sheetName) {
+  const clean = String(sheetName).trim().toLowerCase();
+  return Object.keys(divisions).find(d => d.toLowerCase() === clean) || null;
+}
 
 // ------------------------------
-// League Importer (Builds Preview List)
+// League Importer (Builds Match List For One Sheet/Division)
 // ------------------------------
-function importLeagueSheet(rawGrid) {
-  console.log("RAW GRID:", rawGrid);
+function parseLeagueSheet(rawGrid, division) {
+  console.log(`RAW GRID (${division}):`, rawGrid);
 
-  // Drop fully-blank rows (common when Excel formatting extends past the real data)
   const grid = rawGrid.filter(row =>
     row && row.some(cell => cell !== undefined && String(cell).trim() !== "")
   );
 
-  console.log("CLEANED GRID:", grid);
+  console.log(`CLEANED GRID (${division}):`, grid);
 
-  pendingImportMatches = [];
+  const result = [];
 
   if (grid.length < 3) {
-    alert("Couldn't find enough rows in the sheet — need at least a date row, one spot row, and a team row.");
-    return;
+    console.warn(`Skipping ${division}: not enough rows.`);
+    return result;
   }
 
   const datesRow = grid[0];
@@ -960,16 +1020,17 @@ function importLeagueSheet(rawGrid) {
 
       if (!spotName) continue;
 
-      const spotID = mapSpotNameToID(spotName);
+      const spotID = mapSpotNameToID(spotName, division);
       if (!spotID) continue;
 
       // Handle DNP
       if (String(score).trim().toUpperCase() === "DNP") {
-        pendingImportMatches.push({
+        result.push({
           date,
           teamA,
           teamB,
           spotID,
+          division,
           dnp: true,
           defaultA: false,
           defaultB: false,
@@ -986,11 +1047,12 @@ function importLeagueSheet(rawGrid) {
         const defaultA = lower.includes("default a");
         const defaultB = lower.includes("default b");
 
-        pendingImportMatches.push({
+        result.push({
           date,
           teamA,
           teamB,
           spotID,
+          division,
           dnp: false,
           defaultA,
           defaultB,
@@ -1005,11 +1067,12 @@ function importLeagueSheet(rawGrid) {
       const parsed = parseScore(score);
       if (!parsed) continue;
 
-      pendingImportMatches.push({
+      result.push({
         date,
         teamA,
         teamB,
         spotID,
+        division,
         dnp: false,
         defaultA: false,
         defaultB: false,
@@ -1020,12 +1083,11 @@ function importLeagueSheet(rawGrid) {
     }
   }
 
-  showPreview();
+  return result;
 }
 
-
 // ------------------------------
-// Preview Window Renderer
+// Preview Window Renderer (grouped by division, then by matchup)
 // ------------------------------
 function showPreview() {
   const previewDiv = document.getElementById("importPreview");
@@ -1039,9 +1101,16 @@ function showPreview() {
     return;
   }
 
+  let currentDivisionHeader = "";
   let currentMatchKey = "";
 
   pendingImportMatches.forEach(m => {
+    if (m.division !== currentDivisionHeader) {
+      currentDivisionHeader = m.division;
+      currentMatchKey = "";
+      content.innerHTML += `<h2>${m.division}</h2>`;
+    }
+
     const matchKey = `${m.date} — ${m.teamA} vs ${m.teamB}`;
 
     if (matchKey !== currentMatchKey) {
@@ -1061,8 +1130,6 @@ function showPreview() {
   });
 }
 
-
-
 // ------------------------------
 // Confirm / Cancel Import
 // ------------------------------
@@ -1078,27 +1145,23 @@ document.getElementById("cancelImportBtn").addEventListener("click", () => {
   document.getElementById("importPreview").style.display = "none";
 });
 
-
 // ------------------------------
-// Spot Name → Spot ID Mapper
+// Spot Name → Spot ID Mapper (looks within the given division's format)
 // ------------------------------
-function mapSpotNameToID(name) {
-  const map = {
-    "Varsity 1st Singles": "V1S",
-    "Varsity 2nd Singles": "V2S",
-    "Varsity 1st Doubles": "V1D",
-    "Varsity 2nd Doubles": "V2D",
-    "Varsity 3rd Doubles": "V3D",
-    "JV 1st Singles": "J1S",
-    "JV 2nd Singles": "J2S",
-    "JV 1st Doubles": "J1D",
-    "JV 2nd Doubles": "J2D",
-    "JV 3rd Doubles": "J3D"
-  };
+function mapSpotNameToID(name, division) {
+  const format = divisionFormats[division];
+  if (!format) return null;
 
-  return map[name] || null;
+  for (let i = 0; i < format.length; i++) {
+    const spotId = format[i];
+    const spot = spotDefinitions[spotId];
+    if (spot && spot.label === name) {
+      return spotId;
+    }
+  }
+
+  return null;
 }
-
 
 // ------------------------------
 // Score Parser (A-B format)
@@ -1115,9 +1178,9 @@ function parseScore(score) {
   return { a, b };
 }
 
-
-// added this function here
-
+// ------------------------------
+// Date Formatter (converts Excel Date objects to MM/DD/YYYY strings)
+// ------------------------------
 function formatImportedDate(value) {
   if (value instanceof Date && !isNaN(value)) {
     const mm = String(value.getMonth() + 1).padStart(2, "0");
@@ -1129,20 +1192,19 @@ function formatImportedDate(value) {
 }
 
 // ------------------------------
-// Save Imported Match
+// Save Imported Matches (grouped by division + date + teams)
 // ------------------------------
-
 function saveImportedMatches(importList) {
   const stored = JSON.parse(localStorage.getItem(STORAGE_KEY)) || [];
   const grouped = {};
 
   importList.forEach(m => {
-    const key = `${m.date}__${m.teamA}__${m.teamB}`;
+    const key = `${m.division}__${m.date}__${m.teamA}__${m.teamB}`;
 
     if (!grouped[key]) {
       grouped[key] = {
         id: Date.now() + Math.random(),
-        division: currentDivision,
+        division: m.division,
         date: m.date,
         teamA: m.teamA,
         teamB: m.teamB,
