@@ -1420,10 +1420,48 @@ function buildSeedBlock(division, level, heading) {
   return rows;
 }
 
+function buildRegionRecordBlock(division, level, heading) {
+  const spotIds = divisionFormats[division].filter(
+    id => spotDefinitions[id].level === level
+  );
+
+  const standingsBySpot = computeStandingsBySpotForDivision(division);
+  const teams = divisions[division];
+
+  const rows = [];
+  rows.push([heading, ...teams]);
+
+  spotIds.forEach(spotId => {
+    const spot = spotDefinitions[spotId];
+    const data = standingsBySpot[spotId];
+    const row = [spot.label];
+
+    teams.forEach(team => {
+      const entry = data.table[team];
+      const record = entry.wins + entry.losses > 0
+        ? `${entry.wins}-${entry.losses}`
+        : "";
+      row.push(record);
+    });
+
+    rows.push(row);
+  });
+
+  rows.push([]); // gap before the next block
+  return rows;
+}
+
+
 function buildDivisionSheetAOA(division) {
-  const varsityBlock = buildSeedBlock(division, "varsity", "Varsity");
-  const jvBlock = buildSeedBlock(division, "jv", "JV");
-  return varsityBlock.concat(jvBlock);
+  const varsitySeedBlock = buildSeedBlock(division, "varsity", "Varsity");
+  const jvSeedBlock = buildSeedBlock(division, "jv", "JV");
+  const varsityRecordBlock = buildRegionRecordBlock(division, "varsity", "Varsity Region Record");
+  const jvRecordBlock = buildRegionRecordBlock(division, "jv", "JV Region Record");
+
+  return varsitySeedBlock
+    .concat(jvSeedBlock)
+    .concat(varsityRecordBlock)
+    .concat(jvRecordBlock);
 }
 
 function exportAllSeedsToExcel() {
