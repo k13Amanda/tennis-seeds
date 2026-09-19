@@ -35,8 +35,8 @@ const divisions = {
     "Kaysville/Layton HS",
     "Weber HS",
     "Fremont HS",
-    "Ridgeline",
-    "Cache Valley"
+    "Ridgeline HS",
+    "Cache Valley HS"
   ]
 };
 
@@ -1008,8 +1008,8 @@ function parseLeagueSheet(rawGrid, division) {
 
   for (let col = 1; col < datesRow.length; col++) {
     const date = formatImportedDate(datesRow[col]);
-    const teamA = teamARow[col];
-    const teamB = teamBRow[col];
+    const teamA = normalizeTeamName(teamARow[col], division);
+    const teamB = normalizeTeamName(teamBRow[col], division);
 
     if (!date || !teamA || !teamB) continue;
 
@@ -1178,6 +1178,16 @@ function parseScore(score) {
   return { a, b };
 }
 
+function normalizeTeamName(name, division) {
+  const officialList = divisions[division];
+  if (!officialList) return name;
+
+  const clean = String(name).trim().toLowerCase();
+  const match = officialList.find(t => t.toLowerCase() === clean);
+
+  return match || name; // falls back to the raw name if truly unrecognized
+}
+
 // ------------------------------
 // Date Formatter (converts Excel Date objects to MM/DD/YYYY strings)
 // ------------------------------
@@ -1244,3 +1254,140 @@ function saveImportedMatches(importList) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(stored));
   matches = stored;
 }
+
+
+
+///Export all seed to Excel
+
+function ordinalLabel(n) {
+  const suffixes = ["th", "st", "nd", "rd"];
+  const v = n % 100;
+  const suffix = suffixes[(v - 20) % 10] || suffixes[v] || suffixes[0];
+  return `${n}${suffix} Seed`;
+}
+
+function computeStandingsBySpotForDivision(division) {
+  const standingsBySpot = {};
+
+  divisionFormats[division].forEach(spotId => {
+    const spot = spotDefinitions[spotId];
+    const table = {};
+
+    divisions[division].forEach(team => {
+      table[team] = {
+        team,
+        wins: 0,
+        losses: 0,
+        gamesWon: 0,
+        gamesLost: 0,
+        headToHead: {}
+      };
+    });
+
+    const filteredMatches = matches.filter(m => m.division === division);
+
+    filteredMatches.forEach(match => {
+      const res = match.spots[spotId];
+      if (!res || res.dnp) return;
+
+      const teamA = match.teamA;
+      const teamB = match.teamB;
+
+      const entryA = table[teamA];
+      const entryB = table[teamB];
+      if (!entryA || !entryB) return;
+
+      const gamesA = res.gamesA || 0;
+      const gamesB = res.gamesB || 0;
+
+      entryA.gamesWon += gamesA;
+      entryA.gamesLost += gamesB;
+      entryB.gamesWon += gamesB;
+      entryB.gamesLost += gamesA;
+
+      if (res.winner === teamA) {
+        entryA.wins += 1;
+        entryB.losses += 1;
+        updateHeadToHead(entryA, entryB.team, true);
+        updateHeadToHead(entryB, entryA.team, false);
+      } else if (res.winner === teamB) {
+        entryB.wins += 1;
+        entryA.losses += 1;
+        updateHeadToHead(entryB, entryA.team, true);
+        updateHeadToHead(entryA, entryB.team, false);
+      }
+    });
+
+    standingsBySpot[spotId] = { spot, table };
+  });
+
+  return standingsBySpot;
+}
+
+function getOrderedTeamsForSpotInDivision(spotId, division) {
+  const standingsBySpot = computeStandingsBySpotForDivision(division);
+  const data = standingsBySpot[spotId];
+  if (!data) return [];
+
+  const teamsArray = Object.values(data.table);
+  const activeTeams = teamsArray.filter(t => t.wins > 0 || t.losses > 0);
+
+  activeTeams.forEach(t => {
+    t.winPct = t.wins + t.losses > 0 ? t.wins / (t.wins + t.losses) : 0;
+    t.gameDiff = t.gamesWon - t.gamesLost;
+  });
+
+  const { ordered } = sortTeamsWithTiebreaks(activeTeams);
+  return ordered.map(t => t.team);
+}
+
+function buildSeedBlock(division, level, heading) {
+  const spotIds = divisionFormats[division].filter(
+    id => spotDefinitions[id].level === level
+  );
+
+  const columns = spotIds.map(id => ({
+    id,
+    label: spotDefinitions[id].label,
+    teams: getOrderedTeamsForSpotInDivision(id, division)
+  }));
+
+  const maxSeeds = Math.max(0, ...columns.map(c => c.teams.length));
+  const rows = [];
+
+  rows.push([heading]);
+  rows.push(["", ...columns.map(c => c.label)]);
+
+  for (let i = 0; i < maxSeeds; i++) {
+    const row = [ordinalLabel(i + 1)];
+    columns.forEach(c => {
+      row.push(c.teams[i] || "");
+    });
+    rows.push(row);
+    rows.push([]); // blank row for results
+    rows.push([]); // blank row for results
+  }
+
+  rows.push([]); // gap before the next block
+  return rows;
+}
+
+function buildDivisionSheetAOA(division) {
+  const varsityBlock = buildSeedBlock(division, "varsity", "Varsity");
+  const jvBlock = buildSeedBlock(division, "jv", "JV");
+  return varsityBlock.concat(jvBlock);
+}
+
+function exportAllSeedsToExcel() {
+  const wb = XLSX.utils.book_new();
+
+  Object.keys(divisions).forEach(division => {
+    const aoa = buildDivisionSheetAOA(division);
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+    XLSX.utils.book_append_sheet(wb, ws, division);
+  });
+
+  XLSX.writeFile(wb, "League_Seeds.xlsx");
+}
+
+document.getElementById("exportSeedsBtn").addEventListener("click", exportAllSeedsToExcel);
