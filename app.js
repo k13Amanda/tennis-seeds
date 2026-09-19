@@ -742,8 +742,7 @@ function renderSeeds(standingsBySpot) {
       t.gameDiff = t.gamesWon - t.gamesLost;
     });
 
-    const { ordered: sorted, trueTies } = sortTeamsWithTiebreaks(activeTeams);
-
+    const { ordered: sorted, trueTies } = sortTeamsWithTiebreaks(activeTeams, currentDivision, spot.level);
     const wrapper = document.createElement("div");
     wrapper.className = "table-wrapper";
 
@@ -846,8 +845,9 @@ function groupByWinPct(teams) {
   return groups;
 }
 
-function resolveGroupTiebreak(group) {
+function resolveGroupTiebreak(group, division, level) {
   const groupNames = new Set(group.map(t => t.team));
+  const overallRecord = computeOverallRecordByLevel(division, level);
 
   group.forEach(t => {
     let rrWins = 0;
@@ -865,12 +865,17 @@ function resolveGroupTiebreak(group) {
     t.rrWins = rrWins;
     t.rrLosses = rrLosses;
     t.rrNet = rrWins - rrLosses;
+
+    const overall = overallRecord[t.team] || { wins: 0, losses: 0 };
+    const overallTotal = overall.wins + overall.losses;
+    t.overallWinPct = overallTotal > 0 ? overall.wins / overallTotal : 0;
   });
 
   const sorted = group.slice().sort((a, b) => {
     if (b.rrNet !== a.rrNet) return b.rrNet - a.rrNet;
     if (b.gameDiff !== a.gameDiff) return b.gameDiff - a.gameDiff;
     if (b.gamesWon !== a.gamesWon) return b.gamesWon - a.gamesWon;
+    if (b.overallWinPct !== a.overallWinPct) return b.overallWinPct - a.overallWinPct;
     return 0;
   });
 
@@ -878,7 +883,12 @@ function resolveGroupTiebreak(group) {
   for (let i = 0; i < sorted.length - 1; i++) {
     const a = sorted[i];
     const b = sorted[i + 1];
-    if (a.rrNet === b.rrNet && a.gameDiff === b.gameDiff && a.gamesWon === b.gamesWon) {
+    if (
+      a.rrNet === b.rrNet &&
+      a.gameDiff === b.gameDiff &&
+      a.gamesWon === b.gamesWon &&
+      a.overallWinPct === b.overallWinPct
+    ) {
       ties.push([a.team, b.team]);
     }
   }
@@ -886,7 +896,7 @@ function resolveGroupTiebreak(group) {
   return { ordered: sorted, ties };
 }
 
-function sortTeamsWithTiebreaks(teams) {
+function sortTeamsWithTiebreaks(teams, division, level) {
   const groups = groupByWinPct(teams);
   let finalOrder = [];
   let allTies = [];
@@ -896,7 +906,7 @@ function sortTeamsWithTiebreaks(teams) {
       finalOrder.push(group[0]);
       return;
     }
-    const { ordered, ties } = resolveGroupTiebreak(group);
+    const { ordered, ties } = resolveGroupTiebreak(group, division, level);
     finalOrder = finalOrder.concat(ordered);
     allTies = allTies.concat(ties);
   });
@@ -1324,6 +1334,44 @@ function computeStandingsBySpotForDivision(division) {
   return standingsBySpot;
 }
 
+
+function computeOverallRecordByLevel(division, level) {
+  const spotIds = divisionFormats[division].filter(
+    id => spotDefinitions[id].level === level
+  );
+
+  const record = {};
+  divisions[division].forEach(team => {
+    record[team] = { wins: 0, losses: 0 };
+  });
+
+  const filteredMatches = matches.filter(m => m.division === division);
+
+  filteredMatches.forEach(match => {
+    spotIds.forEach(spotId => {
+      const res = match.spots[spotId];
+      if (!res || res.dnp) return;
+
+      const teamA = match.teamA;
+      const teamB = match.teamB;
+
+      if (!record[teamA] || !record[teamB]) return;
+
+      if (res.winner === teamA) {
+        record[teamA].wins += 1;
+        record[teamB].losses += 1;
+      } else if (res.winner === teamB) {
+        record[teamB].wins += 1;
+        record[teamA].losses += 1;
+      }
+    });
+  });
+
+  return record;
+}
+
+
+
 function getOrderedTeamsForSpotInDivision(spotId, division) {
   const standingsBySpot = computeStandingsBySpotForDivision(division);
   const data = standingsBySpot[spotId];
@@ -1337,7 +1385,7 @@ function getOrderedTeamsForSpotInDivision(spotId, division) {
     t.gameDiff = t.gamesWon - t.gamesLost;
   });
 
-  const { ordered } = sortTeamsWithTiebreaks(activeTeams);
+  const { ordered } = sortTeamsWithTiebreaks(activeTeams, division, data.spot.level);
   return ordered.map(t => t.team);
 }
 
