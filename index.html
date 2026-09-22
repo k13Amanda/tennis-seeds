@@ -27,6 +27,20 @@
     </header>
 
     <main>
+        <!-- Excel Import -->
+        <input type="file" id="excelUpload" accept=".xlsx,.xls" />
+        <button id="importExcelBtn">Import Excel</button>
+
+        <!-- Preview Window -->
+        <div id="importPreview" style="display:none; padding:20px; border:2px solid #444; margin-top:20px;">
+            <h2>Preview Import</h2>
+            <div id="previewContent"></div>
+            <button id="confirmImportBtn">Confirm Import</button>
+            <button id="cancelImportBtn">Cancel</button>
+        </div>
+
+        <h2>Match Input</h2>
+
         <!-- Match Info -->
         <section class="card">
             <h2>Match Information</h2>
@@ -46,17 +60,6 @@
             </div>
         </section>
 
-        <!-- Excel Import -->
-        <input type="file" id="excelUpload" accept=".xlsx,.xls" />
-        <button id="importExcelBtn">Import Excel</button>
-
-        <!-- Preview Window -->
-        <div id="importPreview" style="display:none; padding:20px; border:2px solid #444; margin-top:20px;">
-            <h2>Preview Import</h2>
-            <div id="previewContent"></div>
-            <button id="confirmImportBtn">Confirm Import</button>
-            <button id="cancelImportBtn">Cancel</button>
-        </div>
 
         <!-- Varsity Section -->
         <section class="card">

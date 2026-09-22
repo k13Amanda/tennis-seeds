@@ -1,6 +1,7 @@
-// --------------------------------------------------
+// ==================================================================
 // CONFIG — DIVISIONS + TEAMS
-// --------------------------------------------------
+// ==================================================================
+
 console.log("APP.JS LOADED");
 
 let pendingImportMatches = [];
@@ -40,9 +41,9 @@ const divisions = {
   ]
 };
 
-// --------------------------------------------------
-// DIVISION FORMATS
-// --------------------------------------------------
+// ------------------------------------------------------------
+// Division formats (which spots exist per division)
+// ------------------------------------------------------------
 
 const divisionFormats = {
   "MS Boys": ["V1S", "V2S", "V1D", "V2D", "V3D", "J1S", "J2S", "J1D", "J2D", "J3D"],
@@ -56,9 +57,17 @@ const divisionFormats = {
   ]
 };
 
-// --------------------------------------------------
-// SPOT DEFINITIONS
-// --------------------------------------------------
+// Divisions that seed by TEAM record (most spots won that day) instead of
+// seeding each spot separately. Currently just High School.
+const teamTournamentDivisions = ["High School"];
+
+function isTeamTournamentDivision(division) {
+  return teamTournamentDivisions.includes(division);
+}
+
+// ------------------------------------------------------------
+// Spot definitions (label, varsity/jv level, target games)
+// ------------------------------------------------------------
 
 const spotDefinitions = {
   "V1S": { label: "Varsity 1st Singles", level: "varsity", targetGames: 8 },
@@ -113,9 +122,9 @@ let matches = [];
 let editMode = false;
 let editMatchId = null;
 
-// --------------------------------------------------
+// ==================================================================
 // INIT
-// --------------------------------------------------
+// ==================================================================
 
 document.addEventListener("DOMContentLoaded", () => {
   setupDivisionButtons();
@@ -133,9 +142,9 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("clearAllBtn").addEventListener("click", onClearAll);
 });
 
-// --------------------------------------------------
-// DIVISION BUTTONS
-// --------------------------------------------------
+// ==================================================================
+// DIVISION BUTTONS + HEADER
+// ==================================================================
 
 function setupDivisionButtons() {
   const buttons = document.querySelectorAll(".division-btn");
@@ -160,18 +169,10 @@ function setupDivisionButtons() {
     .classList.add("active");
 }
 
-// --------------------------------------------------
-// UPDATE DIVISION HEADER
-// --------------------------------------------------
-
 function updateDivisionHeader() {
   const title = document.getElementById("divisionTitle");
   title.textContent = `${currentDivision} Division`;
 }
-
-// --------------------------------------------------
-// LOAD TEAMS FOR DIVISION
-// --------------------------------------------------
 
 function loadTeamsForDivision(division) {
   const teamASelect = document.getElementById("teamASelect");
@@ -197,9 +198,9 @@ function loadTeamsForDivision(division) {
   teamBSelect.selectedIndex = divisions[division].length > 1 ? 1 : 0;
 }
 
-// --------------------------------------------------
-// RENDER SPOT INPUTS
-// --------------------------------------------------
+// ==================================================================
+// SPOT INPUT CARDS (match entry form)
+// ==================================================================
 
 function renderSpotInputs() {
   const varsityContainer = document.getElementById("varsitySpots");
@@ -297,9 +298,9 @@ function createSpotCard(spotId, spot) {
   return card;
 }
 
-// --------------------------------------------------
-// SAVE / EDIT / DELETE MATCHES
-// --------------------------------------------------
+// ==================================================================
+// SAVE / EDIT / DELETE MATCHES (manual entry)
+// ==================================================================
 
 function onSaveMatch() {
   const date = document.getElementById("matchDate").value || "";
@@ -542,9 +543,9 @@ function saveEditedMatch() {
   renderAll();
 }
 
-// --------------------------------------------------
-// MATCHES LIST
-// --------------------------------------------------
+// ==================================================================
+// SAVED MATCHES LIST
+// ==================================================================
 
 function renderMatchesList() {
   const container = document.getElementById("matchesList");
@@ -617,9 +618,9 @@ function renderMatchesList() {
     });
 }
 
-// --------------------------------------------------
-// STORAGE
-// --------------------------------------------------
+// ==================================================================
+// LOCAL STORAGE
+// ==================================================================
 
 function saveMatches() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(matches));
@@ -646,18 +647,24 @@ function onClearAll() {
   renderAll();
 }
 
-// --------------------------------------------------
-// STANDINGS + SEEDS
-// --------------------------------------------------
+// ==================================================================
+// PER-SPOT STANDINGS + SEEDING (MS Boys, MS Girls, Orange Ball)
+// ==================================================================
 
 function computeStandingsBySpot() {
+  return computeStandingsBySpotForDivision(currentDivision);
+}
+
+// Same as above, but for any division (used by the Excel export, which
+// needs to build sheets for ALL divisions, not just the one on screen).
+function computeStandingsBySpotForDivision(division) {
   const standingsBySpot = {};
 
-  divisionFormats[currentDivision].forEach(spotId => {
+  divisionFormats[division].forEach(spotId => {
     const spot = spotDefinitions[spotId];
     const table = {};
 
-    divisions[currentDivision].forEach(team => {
+    divisions[division].forEach(team => {
       table[team] = {
         team,
         wins: 0,
@@ -668,7 +675,7 @@ function computeStandingsBySpot() {
       };
     });
 
-    const filteredMatches = matches.filter(m => m.division === currentDivision);
+    const filteredMatches = matches.filter(m => m.division === division);
 
     filteredMatches.forEach(match => {
       const res = match.spots[spotId];
@@ -719,12 +726,61 @@ function updateHeadToHead(entry, opponent, win) {
   }
 }
 
+// Overall same-level record (all spots at that level combined) — used as
+// the last tiebreaker before declaring a true tie.
+function computeOverallRecordByLevel(division, level) {
+  const spotIds = divisionFormats[division].filter(
+    id => spotDefinitions[id].level === level
+  );
+
+  const record = {};
+  divisions[division].forEach(team => {
+    record[team] = { wins: 0, losses: 0 };
+  });
+
+  const filteredMatches = matches.filter(m => m.division === division);
+
+  filteredMatches.forEach(match => {
+    spotIds.forEach(spotId => {
+      const res = match.spots[spotId];
+      if (!res || res.dnp) return;
+
+      const teamA = match.teamA;
+      const teamB = match.teamB;
+
+      if (!record[teamA] || !record[teamB]) return;
+
+      if (res.winner === teamA) {
+        record[teamA].wins += 1;
+        record[teamB].losses += 1;
+      } else if (res.winner === teamB) {
+        record[teamB].wins += 1;
+        record[teamA].losses += 1;
+      }
+    });
+  });
+
+  return record;
+}
+
+// ------------------------------------------------------------
+// Rendering the on-screen seed tables
+// ------------------------------------------------------------
+
 function renderSeeds(standingsBySpot) {
   const varsityContainer = document.getElementById("varsitySeeds");
   const jvContainer = document.getElementById("jvSeeds");
 
   varsityContainer.innerHTML = "";
   jvContainer.innerHTML = "";
+
+  // High School (and any future "team tournament" division) gets a totally
+  // different seed table — see the TEAM TOURNAMENT SEEDING section below.
+  if (isTeamTournamentDivision(currentDivision)) {
+    renderTeamSeedsTable(varsityContainer, "varsity");
+    renderTeamSeedsTable(jvContainer, "jv");
+    return;
+  }
 
   divisionFormats[currentDivision].forEach(spotId => {
     const data = standingsBySpot[spotId];
@@ -743,6 +799,7 @@ function renderSeeds(standingsBySpot) {
     });
 
     const { ordered: sorted, trueTies } = sortTeamsWithTiebreaks(activeTeams, currentDivision, spot.level);
+
     const wrapper = document.createElement("div");
     wrapper.className = "table-wrapper";
 
@@ -820,9 +877,12 @@ function renderSeeds(standingsBySpot) {
   });
 }
 
-// --------------------------------------------------
-// TIE BREAK RULES
-// --------------------------------------------------
+// ==================================================================
+// TIE BREAK RULES (per-spot seeding)
+//   Order: win % -> head-to-head within tied group (round robin,
+//   rematches included) -> game differential -> total games won ->
+//   overall same-level record -> true tie if still equal
+// ==================================================================
 
 function groupByWinPct(teams) {
   const sorted = teams.slice().sort((a, b) => b.winPct - a.winPct);
@@ -924,9 +984,181 @@ function formatTrueTies(ties) {
   return `True tie between: ${list}. All tiebreakers exhausted.`;
 }
 
-// --------------------------------------------------
+// ==================================================================
+// TEAM TOURNAMENT SEEDING (High School — team record, not per-spot)
+//   A dual match winner = whichever team wins more of that level's
+//   spots that day. Teams are then seeded by their team-match record.
+//   Tiebreak order: win % -> head-to-head (round robin) -> spot
+//   differential -> total spots won -> true tie if still equal
+// ==================================================================
+
+function computeTeamMatchResults(division, level) {
+  const spotIds = divisionFormats[division].filter(
+    id => spotDefinitions[id].level === level
+  );
+
+  const filteredMatches = matches.filter(m => m.division === division);
+
+  return filteredMatches.map(match => {
+    let countA = 0;
+    let countB = 0;
+
+    spotIds.forEach(spotId => {
+      const res = match.spots[spotId];
+      if (!res || res.dnp || !res.winner) return;
+      if (res.winner === match.teamA) countA++;
+      else if (res.winner === match.teamB) countB++;
+    });
+
+    let winner = null;
+    if (countA > countB) winner = match.teamA;
+    else if (countB > countA) winner = match.teamB;
+
+    return { date: match.date, teamA: match.teamA, teamB: match.teamB, countA, countB, winner };
+  });
+}
+
+function computeTeamStandings(division, level) {
+  const teamMatches = computeTeamMatchResults(division, level);
+  const table = {};
+
+  divisions[division].forEach(team => {
+    table[team] = { team, wins: 0, losses: 0, ties: 0, spotsWon: 0, spotsLost: 0, headToHead: {} };
+  });
+
+  teamMatches.forEach(tm => {
+    const entryA = table[tm.teamA];
+    const entryB = table[tm.teamB];
+    if (!entryA || !entryB) return;
+
+    entryA.spotsWon += tm.countA;
+    entryA.spotsLost += tm.countB;
+    entryB.spotsWon += tm.countB;
+    entryB.spotsLost += tm.countA;
+
+    if (tm.winner === tm.teamA) {
+      entryA.wins += 1;
+      entryB.losses += 1;
+      updateHeadToHead(entryA, entryB.team, true);
+      updateHeadToHead(entryB, entryA.team, false);
+    } else if (tm.winner === tm.teamB) {
+      entryB.wins += 1;
+      entryA.losses += 1;
+      updateHeadToHead(entryB, entryA.team, true);
+      updateHeadToHead(entryA, entryB.team, false);
+    } else {
+      entryA.ties += 1;
+      entryB.ties += 1;
+    }
+  });
+
+  return table;
+}
+
+function sortTeamStandingsWithTiebreaks(teams) {
+  teams.forEach(t => {
+    t.winPct = (t.wins + t.losses) > 0 ? t.wins / (t.wins + t.losses) : 0;
+    t.spotDiff = t.spotsWon - t.spotsLost;
+  });
+
+  const groups = groupByWinPct(teams);
+  let finalOrder = [];
+  let allTies = [];
+
+  groups.forEach(group => {
+    if (group.length === 1) {
+      finalOrder.push(group[0]);
+      return;
+    }
+
+    const groupNames = new Set(group.map(t => t.team));
+
+    group.forEach(t => {
+      let rrWins = 0, rrLosses = 0;
+      groupNames.forEach(opp => {
+        if (opp === t.team) return;
+        const h2h = t.headToHead[opp];
+        if (h2h) { rrWins += h2h.wins; rrLosses += h2h.losses; }
+      });
+      t.rrNet = rrWins - rrLosses;
+    });
+
+    const sorted = group.slice().sort((a, b) => {
+      if (b.rrNet !== a.rrNet) return b.rrNet - a.rrNet;
+      if (b.spotDiff !== a.spotDiff) return b.spotDiff - a.spotDiff;
+      if (b.spotsWon !== a.spotsWon) return b.spotsWon - a.spotsWon;
+      return 0;
+    });
+
+    const ties = [];
+    for (let i = 0; i < sorted.length - 1; i++) {
+      const a = sorted[i], b = sorted[i + 1];
+      if (a.rrNet === b.rrNet && a.spotDiff === b.spotDiff && a.spotsWon === b.spotsWon) {
+        ties.push([a.team, b.team]);
+      }
+    }
+
+    finalOrder = finalOrder.concat(sorted);
+    allTies = allTies.concat(ties);
+  });
+
+  return { ordered: finalOrder, trueTies: allTies };
+}
+
+function renderTeamSeedsTable(container, level) {
+  const table = computeTeamStandings(currentDivision, level);
+  const activeTeams = Object.values(table).filter(t => t.wins > 0 || t.losses > 0 || t.ties > 0);
+  if (activeTeams.length === 0) return;
+
+  const { ordered, trueTies } = sortTeamStandingsWithTiebreaks(activeTeams);
+
+  const wrapper = document.createElement("div");
+  wrapper.className = "table-wrapper";
+
+  const title = document.createElement("div");
+  title.textContent = level === "varsity" ? "Varsity Team Standings" : "JV Team Standings";
+  title.style.fontWeight = "600";
+  title.style.marginTop = "0.5rem";
+  wrapper.appendChild(title);
+
+  const tbl = document.createElement("table");
+  const thead = document.createElement("thead");
+  const trh = document.createElement("tr");
+  ["Seed", "Team", "Wins", "Losses", "Win %", "Spot Diff", "Spots Won"].forEach(h => {
+    const th = document.createElement("th");
+    th.textContent = h;
+    trh.appendChild(th);
+  });
+  thead.appendChild(trh);
+  tbl.appendChild(thead);
+
+  const tbody = document.createElement("tbody");
+  ordered.forEach((t, idx) => {
+    const tr = document.createElement("tr");
+    [idx + 1, t.team, t.wins, t.losses, (t.winPct * 100).toFixed(1) + "%", t.spotDiff, t.spotsWon].forEach(val => {
+      const td = document.createElement("td");
+      td.textContent = val;
+      tr.appendChild(td);
+    });
+    tbody.appendChild(tr);
+  });
+  tbl.appendChild(tbody);
+  wrapper.appendChild(tbl);
+
+  const tieNote = formatTrueTies(trueTies);
+  if (tieNote) {
+    const noteDiv = document.createElement("div");
+    noteDiv.className = "tie-note";
+    noteDiv.textContent = tieNote;
+    wrapper.appendChild(noteDiv);
+  }
+
+  container.appendChild(wrapper);
+}
+
+// ==================================================================
 // RENDER EVERYTHING
-// --------------------------------------------------
+// ==================================================================
 
 function renderAll() {
   renderMatchesList();
@@ -934,13 +1166,14 @@ function renderAll() {
   renderSeeds(standingsBySpot);
 }
 
-// ======================================================
-// ===== EXCEL IMPORT + PREVIEW WINDOW SECTION =====
-// ======================================================
+// ==================================================================
+// EXCEL IMPORT + PREVIEW WINDOW
+// ==================================================================
 
-// ------------------------------
-// Excel Upload Handler (multi-sheet: one tab per division)
-// ------------------------------
+// ------------------------------------------------------------
+// Upload handler — one workbook, one tab per division
+// ------------------------------------------------------------
+
 document.getElementById("importExcelBtn").addEventListener("click", () => {
   const fileInput = document.getElementById("excelUpload");
   const file = fileInput.files[0];
@@ -984,17 +1217,15 @@ document.getElementById("importExcelBtn").addEventListener("click", () => {
   reader.readAsArrayBuffer(file);
 });
 
-// ------------------------------
-// Sheet Tab Name → Division Matcher
-// ------------------------------
 function matchSheetNameToDivision(sheetName) {
   const clean = String(sheetName).trim().toLowerCase();
   return Object.keys(divisions).find(d => d.toLowerCase() === clean) || null;
 }
 
-// ------------------------------
-// League Importer (Builds Match List For One Sheet/Division)
-// ------------------------------
+// ------------------------------------------------------------
+// Parses one sheet's grid into a flat list of match/spot results
+// ------------------------------------------------------------
+
 function parseLeagueSheet(rawGrid, division) {
   console.log(`RAW GRID (${division}):`, rawGrid);
 
@@ -1036,17 +1267,9 @@ function parseLeagueSheet(rawGrid, division) {
       // Handle DNP
       if (String(score).trim().toUpperCase() === "DNP") {
         result.push({
-          date,
-          teamA,
-          teamB,
-          spotID,
-          division,
-          dnp: true,
-          defaultA: false,
-          defaultB: false,
-          scoreA: null,
-          scoreB: null,
-          rawScore: "DNP"
+          date, teamA, teamB, spotID, division,
+          dnp: true, defaultA: false, defaultB: false,
+          scoreA: null, scoreB: null, rawScore: "DNP"
         });
         continue;
       }
@@ -1058,17 +1281,9 @@ function parseLeagueSheet(rawGrid, division) {
         const defaultB = lower.includes("default b");
 
         result.push({
-          date,
-          teamA,
-          teamB,
-          spotID,
-          division,
-          dnp: false,
-          defaultA,
-          defaultB,
-          scoreA: 0,
-          scoreB: 0,
-          rawScore: score
+          date, teamA, teamB, spotID, division,
+          dnp: false, defaultA, defaultB,
+          scoreA: 0, scoreB: 0, rawScore: score
         });
         continue;
       }
@@ -1078,17 +1293,9 @@ function parseLeagueSheet(rawGrid, division) {
       if (!parsed) continue;
 
       result.push({
-        date,
-        teamA,
-        teamB,
-        spotID,
-        division,
-        dnp: false,
-        defaultA: false,
-        defaultB: false,
-        scoreA: parsed.a,
-        scoreB: parsed.b,
-        rawScore: score
+        date, teamA, teamB, spotID, division,
+        dnp: false, defaultA: false, defaultB: false,
+        scoreA: parsed.a, scoreB: parsed.b, rawScore: score
       });
     }
   }
@@ -1096,9 +1303,10 @@ function parseLeagueSheet(rawGrid, division) {
   return result;
 }
 
-// ------------------------------
-// Preview Window Renderer (grouped by division, then by matchup)
-// ------------------------------
+// ------------------------------------------------------------
+// Preview window (grouped by division, then by matchup)
+// ------------------------------------------------------------
+
 function showPreview() {
   const previewDiv = document.getElementById("importPreview");
   const content = document.getElementById("previewContent");
@@ -1140,9 +1348,6 @@ function showPreview() {
   });
 }
 
-// ------------------------------
-// Confirm / Cancel Import
-// ------------------------------
 document.getElementById("confirmImportBtn").addEventListener("click", () => {
   saveImportedMatches(pendingImportMatches);
   alert("Import complete!");
@@ -1155,9 +1360,10 @@ document.getElementById("cancelImportBtn").addEventListener("click", () => {
   document.getElementById("importPreview").style.display = "none";
 });
 
-// ------------------------------
-// Spot Name → Spot ID Mapper (looks within the given division's format)
-// ------------------------------
+// ------------------------------------------------------------
+// Lookup / parsing helpers used by the importer
+// ------------------------------------------------------------
+
 function mapSpotNameToID(name, division) {
   const format = divisionFormats[division];
   if (!format) return null;
@@ -1173,9 +1379,6 @@ function mapSpotNameToID(name, division) {
   return null;
 }
 
-// ------------------------------
-// Score Parser (A-B format)
-// ------------------------------
 function parseScore(score) {
   const parts = String(score).split("-");
   if (parts.length !== 2) return null;
@@ -1198,9 +1401,6 @@ function normalizeTeamName(name, division) {
   return match || name; // falls back to the raw name if truly unrecognized
 }
 
-// ------------------------------
-// Date Formatter (converts Excel Date objects to MM/DD/YYYY strings)
-// ------------------------------
 function formatImportedDate(value) {
   if (value instanceof Date && !isNaN(value)) {
     const mm = String(value.getMonth() + 1).padStart(2, "0");
@@ -1211,9 +1411,11 @@ function formatImportedDate(value) {
   return value; // fallback: leave as-is if it wasn't parsed as a Date
 }
 
-// ------------------------------
-// Save Imported Matches (grouped by division + date + teams)
-// ------------------------------
+// ------------------------------------------------------------
+// Saves the confirmed import, grouped into one match record per
+// division + date + team pair (so all 10/18 spots land together)
+// ------------------------------------------------------------
+
 function saveImportedMatches(importList) {
   const stored = JSON.parse(localStorage.getItem(STORAGE_KEY)) || [];
   const grouped = {};
@@ -1265,9 +1467,14 @@ function saveImportedMatches(importList) {
   matches = stored;
 }
 
-
-
-///Export all seed to Excel
+// ==================================================================
+// EXPORT ALL SEEDS TO EXCEL
+//   One workbook, one tab per division:
+//     - Team-tournament divisions (High School): Varsity + JV team
+//       standings blocks
+//     - Per-spot divisions (MS Boys/Girls, Orange Ball): Varsity + JV
+//       seed grids, then Varsity + JV "region record" grids
+// ==================================================================
 
 function ordinalLabel(n) {
   const suffixes = ["th", "st", "nd", "rd"];
@@ -1275,102 +1482,6 @@ function ordinalLabel(n) {
   const suffix = suffixes[(v - 20) % 10] || suffixes[v] || suffixes[0];
   return `${n}${suffix} Seed`;
 }
-
-function computeStandingsBySpotForDivision(division) {
-  const standingsBySpot = {};
-
-  divisionFormats[division].forEach(spotId => {
-    const spot = spotDefinitions[spotId];
-    const table = {};
-
-    divisions[division].forEach(team => {
-      table[team] = {
-        team,
-        wins: 0,
-        losses: 0,
-        gamesWon: 0,
-        gamesLost: 0,
-        headToHead: {}
-      };
-    });
-
-    const filteredMatches = matches.filter(m => m.division === division);
-
-    filteredMatches.forEach(match => {
-      const res = match.spots[spotId];
-      if (!res || res.dnp) return;
-
-      const teamA = match.teamA;
-      const teamB = match.teamB;
-
-      const entryA = table[teamA];
-      const entryB = table[teamB];
-      if (!entryA || !entryB) return;
-
-      const gamesA = res.gamesA || 0;
-      const gamesB = res.gamesB || 0;
-
-      entryA.gamesWon += gamesA;
-      entryA.gamesLost += gamesB;
-      entryB.gamesWon += gamesB;
-      entryB.gamesLost += gamesA;
-
-      if (res.winner === teamA) {
-        entryA.wins += 1;
-        entryB.losses += 1;
-        updateHeadToHead(entryA, entryB.team, true);
-        updateHeadToHead(entryB, entryA.team, false);
-      } else if (res.winner === teamB) {
-        entryB.wins += 1;
-        entryA.losses += 1;
-        updateHeadToHead(entryB, entryA.team, true);
-        updateHeadToHead(entryA, entryB.team, false);
-      }
-    });
-
-    standingsBySpot[spotId] = { spot, table };
-  });
-
-  return standingsBySpot;
-}
-
-
-function computeOverallRecordByLevel(division, level) {
-  const spotIds = divisionFormats[division].filter(
-    id => spotDefinitions[id].level === level
-  );
-
-  const record = {};
-  divisions[division].forEach(team => {
-    record[team] = { wins: 0, losses: 0 };
-  });
-
-  const filteredMatches = matches.filter(m => m.division === division);
-
-  filteredMatches.forEach(match => {
-    spotIds.forEach(spotId => {
-      const res = match.spots[spotId];
-      if (!res || res.dnp) return;
-
-      const teamA = match.teamA;
-      const teamB = match.teamB;
-
-      if (!record[teamA] || !record[teamB]) return;
-
-      if (res.winner === teamA) {
-        record[teamA].wins += 1;
-        record[teamB].losses += 1;
-      } else if (res.winner === teamB) {
-        record[teamB].wins += 1;
-        record[teamA].losses += 1;
-      }
-    });
-  });
-
-  return record;
-}
-
-
 
 function getOrderedTeamsForSpotInDivision(spotId, division) {
   const standingsBySpot = computeStandingsBySpotForDivision(division);
@@ -1451,17 +1562,34 @@ function buildRegionRecordBlock(division, level, heading) {
   return rows;
 }
 
+function buildTeamStandingsBlock(division, level, heading) {
+  const table = computeTeamStandings(division, level);
+  const activeTeams = Object.values(table).filter(t => t.wins > 0 || t.losses > 0 || t.ties > 0);
+  const { ordered } = sortTeamStandingsWithTiebreaks(activeTeams);
+
+  const rows = [];
+  rows.push([heading]);
+  rows.push(["Seed", "Team", "Wins", "Losses", "Spot Diff", "Spots Won"]);
+  ordered.forEach((t, idx) => {
+    rows.push([idx + 1, t.team, t.wins, t.losses, t.spotDiff, t.spotsWon]);
+  });
+  rows.push([]);
+  return rows;
+}
 
 function buildDivisionSheetAOA(division) {
+  if (isTeamTournamentDivision(division)) {
+    const varsityBlock = buildTeamStandingsBlock(division, "varsity", "Varsity Team Standings");
+    const jvBlock = buildTeamStandingsBlock(division, "jv", "JV Team Standings");
+    return varsityBlock.concat(jvBlock);
+  }
+
   const varsitySeedBlock = buildSeedBlock(division, "varsity", "Varsity");
   const jvSeedBlock = buildSeedBlock(division, "jv", "JV");
   const varsityRecordBlock = buildRegionRecordBlock(division, "varsity", "Varsity Region Record");
   const jvRecordBlock = buildRegionRecordBlock(division, "jv", "JV Region Record");
 
-  return varsitySeedBlock
-    .concat(jvSeedBlock)
-    .concat(varsityRecordBlock)
-    .concat(jvRecordBlock);
+  return varsitySeedBlock.concat(jvSeedBlock).concat(varsityRecordBlock).concat(jvRecordBlock);
 }
 
 function exportAllSeedsToExcel() {
