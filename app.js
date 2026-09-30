@@ -65,6 +65,20 @@ function isTeamTournamentDivision(division) {
   return teamTournamentDivisions.includes(division);
 }
 
+// Divisions split into separate regions for seeding purposes. Standings,
+// tiebreakers, and the Excel export are all computed per region — a match
+// only counts toward a region's standings if BOTH teams are in that region.
+const divisionRegions = {
+  "Orange Ball": {
+    "Region 1": ["Bountiful Orange", "Farmington Orange", "Kaysville Orange", "Layton Orange"],
+    "Region 2": ["Clearfield Orange", "North Ogden Orange", "Pleasant View Orange"]
+  }
+};
+
+function getRegionsForDivision(division) {
+  return divisionRegions[division] || null;
+}
+
 // ------------------------------------------------------------
 // Spot definitions (label, varsity/jv level, target games)
 // ------------------------------------------------------------
@@ -649,22 +663,26 @@ function onClearAll() {
 
 // ==================================================================
 // PER-SPOT STANDINGS + SEEDING (MS Boys, MS Girls, Orange Ball)
+//   teamList is optional — defaults to the whole division's team list.
+//   Orange Ball passes a REGION's team list instead, so a match only
+//   counts if both teams are in that region (any other match is
+//   automatically skipped since the region's table won't have an
+//   entry for a team outside it).
 // ==================================================================
 
 function computeStandingsBySpot() {
   return computeStandingsBySpotForDivision(currentDivision);
 }
 
-// Same as above, but for any division (used by the Excel export, which
-// needs to build sheets for ALL divisions, not just the one on screen).
-function computeStandingsBySpotForDivision(division) {
+function computeStandingsBySpotForDivision(division, teamList) {
+  const teams = teamList || divisions[division];
   const standingsBySpot = {};
 
   divisionFormats[division].forEach(spotId => {
     const spot = spotDefinitions[spotId];
     const table = {};
 
-    divisions[division].forEach(team => {
+    teams.forEach(team => {
       table[team] = {
         team,
         wins: 0,
@@ -686,7 +704,7 @@ function computeStandingsBySpotForDivision(division) {
 
       const entryA = table[teamA];
       const entryB = table[teamB];
-      if (!entryA || !entryB) return;
+      if (!entryA || !entryB) return; // also filters out cross-region matches
 
       const gamesA = res.gamesA || 0;
       const gamesB = res.gamesB || 0;
@@ -728,13 +746,14 @@ function updateHeadToHead(entry, opponent, win) {
 
 // Overall same-level record (all spots at that level combined) — used as
 // the last tiebreaker before declaring a true tie.
-function computeOverallRecordByLevel(division, level) {
+function computeOverallRecordByLevel(division, level, teamList) {
+  const teams = teamList || divisions[division];
   const spotIds = divisionFormats[division].filter(
     id => spotDefinitions[id].level === level
   );
 
   const record = {};
-  divisions[division].forEach(team => {
+  teams.forEach(team => {
     record[team] = { wins: 0, losses: 0 };
   });
 
@@ -782,7 +801,24 @@ function renderSeeds(standingsBySpot) {
     return;
   }
 
-  divisionFormats[currentDivision].forEach(spotId => {
+  const regions = getRegionsForDivision(currentDivision);
+
+  if (regions) {
+    Object.keys(regions).forEach(regionName => {
+      const teamList = regions[regionName];
+      const regionStandings = computeStandingsBySpotForDivision(currentDivision, teamList);
+      renderSpotSeedTables(regionStandings, currentDivision, teamList, varsityContainer, jvContainer, regionName);
+    });
+    return;
+  }
+
+  renderSpotSeedTables(standingsBySpot, currentDivision, divisions[currentDivision], varsityContainer, jvContainer, null);
+}
+
+// Builds the per-spot seed tables for one set of standings (one division,
+// or one region within a division) and appends them to the given containers.
+function renderSpotSeedTables(standingsBySpot, division, teamList, varsityContainer, jvContainer, regionLabel) {
+  divisionFormats[division].forEach(spotId => {
     const data = standingsBySpot[spotId];
     if (!data) return;
 
@@ -798,13 +834,13 @@ function renderSeeds(standingsBySpot) {
       t.gameDiff = t.gamesWon - t.gamesLost;
     });
 
-    const { ordered: sorted, trueTies } = sortTeamsWithTiebreaks(activeTeams, currentDivision, spot.level);
+    const { ordered: sorted, trueTies } = sortTeamsWithTiebreaks(activeTeams, division, spot.level, teamList);
 
     const wrapper = document.createElement("div");
     wrapper.className = "table-wrapper";
 
     const title = document.createElement("div");
-    title.textContent = spot.label;
+    title.textContent = regionLabel ? `${regionLabel} — ${spot.label}` : spot.label;
     title.style.fontWeight = "600";
     title.style.marginTop = "0.5rem";
     wrapper.appendChild(title);
@@ -905,9 +941,9 @@ function groupByWinPct(teams) {
   return groups;
 }
 
-function resolveGroupTiebreak(group, division, level) {
+function resolveGroupTiebreak(group, division, level, teamList) {
   const groupNames = new Set(group.map(t => t.team));
-  const overallRecord = computeOverallRecordByLevel(division, level);
+  const overallRecord = computeOverallRecordByLevel(division, level, teamList);
 
   group.forEach(t => {
     let rrWins = 0;
@@ -956,7 +992,7 @@ function resolveGroupTiebreak(group, division, level) {
   return { ordered: sorted, ties };
 }
 
-function sortTeamsWithTiebreaks(teams, division, level) {
+function sortTeamsWithTiebreaks(teams, division, level, teamList) {
   const groups = groupByWinPct(teams);
   let finalOrder = [];
   let allTies = [];
@@ -966,7 +1002,7 @@ function sortTeamsWithTiebreaks(teams, division, level) {
       finalOrder.push(group[0]);
       return;
     }
-    const { ordered, ties } = resolveGroupTiebreak(group, division, level);
+    const { ordered, ties } = resolveGroupTiebreak(group, division, level, teamList);
     finalOrder = finalOrder.concat(ordered);
     allTies = allTies.concat(ties);
   });
@@ -1472,8 +1508,10 @@ function saveImportedMatches(importList) {
 //   One workbook, one tab per division:
 //     - Team-tournament divisions (High School): Varsity + JV team
 //       standings blocks
-//     - Per-spot divisions (MS Boys/Girls, Orange Ball): Varsity + JV
-//       seed grids, then Varsity + JV "region record" grids
+//     - Regioned divisions (Orange Ball): the per-spot blocks below,
+//       repeated once per region
+//     - Other per-spot divisions (MS Boys/Girls): Varsity + JV seed
+//       grids, then Varsity + JV "region record" grids
 // ==================================================================
 
 function ordinalLabel(n) {
@@ -1483,8 +1521,8 @@ function ordinalLabel(n) {
   return `${n}${suffix} Seed`;
 }
 
-function getOrderedTeamsForSpotInDivision(spotId, division) {
-  const standingsBySpot = computeStandingsBySpotForDivision(division);
+function getOrderedTeamsForSpotInDivision(spotId, division, teamList) {
+  const standingsBySpot = computeStandingsBySpotForDivision(division, teamList);
   const data = standingsBySpot[spotId];
   if (!data) return [];
 
@@ -1496,11 +1534,11 @@ function getOrderedTeamsForSpotInDivision(spotId, division) {
     t.gameDiff = t.gamesWon - t.gamesLost;
   });
 
-  const { ordered } = sortTeamsWithTiebreaks(activeTeams, division, data.spot.level);
+  const { ordered } = sortTeamsWithTiebreaks(activeTeams, division, data.spot.level, teamList);
   return ordered.map(t => t.team);
 }
 
-function buildSeedBlock(division, level, heading) {
+function buildSeedBlock(division, level, heading, teamList) {
   const spotIds = divisionFormats[division].filter(
     id => spotDefinitions[id].level === level
   );
@@ -1508,7 +1546,7 @@ function buildSeedBlock(division, level, heading) {
   const columns = spotIds.map(id => ({
     id,
     label: spotDefinitions[id].label,
-    teams: getOrderedTeamsForSpotInDivision(id, division)
+    teams: getOrderedTeamsForSpotInDivision(id, division, teamList)
   }));
 
   const maxSeeds = Math.max(0, ...columns.map(c => c.teams.length));
@@ -1531,13 +1569,13 @@ function buildSeedBlock(division, level, heading) {
   return rows;
 }
 
-function buildRegionRecordBlock(division, level, heading) {
+function buildRegionRecordBlock(division, level, heading, teamList) {
   const spotIds = divisionFormats[division].filter(
     id => spotDefinitions[id].level === level
   );
 
-  const standingsBySpot = computeStandingsBySpotForDivision(division);
-  const teams = divisions[division];
+  const teams = teamList || divisions[division];
+  const standingsBySpot = computeStandingsBySpotForDivision(division, teams);
 
   const rows = [];
   rows.push([heading, ...teams]);
@@ -1584,10 +1622,24 @@ function buildDivisionSheetAOA(division) {
     return varsityBlock.concat(jvBlock);
   }
 
-  const varsitySeedBlock = buildSeedBlock(division, "varsity", "Varsity");
-  const jvSeedBlock = buildSeedBlock(division, "jv", "JV");
-  const varsityRecordBlock = buildRegionRecordBlock(division, "varsity", "Varsity Region Record");
-  const jvRecordBlock = buildRegionRecordBlock(division, "jv", "JV Region Record");
+  const regions = getRegionsForDivision(division);
+
+  if (regions) {
+    let rows = [];
+    Object.keys(regions).forEach(regionName => {
+      const teamList = regions[regionName];
+      rows = rows.concat(buildSeedBlock(division, "varsity", `${regionName} — Varsity`, teamList));
+      rows = rows.concat(buildSeedBlock(division, "jv", `${regionName} — JV`, teamList));
+      rows = rows.concat(buildRegionRecordBlock(division, "varsity", `${regionName} — Varsity Region Record`, teamList));
+      rows = rows.concat(buildRegionRecordBlock(division, "jv", `${regionName} — JV Region Record`, teamList));
+    });
+    return rows;
+  }
+
+  const varsitySeedBlock = buildSeedBlock(division, "varsity", "Varsity", divisions[division]);
+  const jvSeedBlock = buildSeedBlock(division, "jv", "JV", divisions[division]);
+  const varsityRecordBlock = buildRegionRecordBlock(division, "varsity", "Varsity Region Record", divisions[division]);
+  const jvRecordBlock = buildRegionRecordBlock(division, "jv", "JV Region Record", divisions[division]);
 
   return varsitySeedBlock.concat(jvSeedBlock).concat(varsityRecordBlock).concat(jvRecordBlock);
 }
