@@ -72,6 +72,17 @@ function getRegionsForDivision(division) {
   return divisionRegions[division] || null;
 }
 
+// Division + level combos where the TEAM record is the actual official
+// seeding (not a bonus stat). Position seeds still show alongside it as
+// an additional view, but the team table drops the "info only" wording.
+const teamIsOfficialSeeding = {
+  "High School": ["varsity"]
+};
+
+function isTeamOfficialSeeding(division, level) {
+  return (teamIsOfficialSeeding[division] || []).includes(level);
+}
+
 // ------------------------------------------------------------
 // Spot definitions (label, varsity/jv level, target games)
 // ------------------------------------------------------------
@@ -777,9 +788,11 @@ function computeOverallRecordByLevel(division, level, teamList) {
 
 // ------------------------------------------------------------
 // Rendering the on-screen tables
-//   Every division shows BOTH position-based seed tables (official)
-//   AND a team-record table underneath (informational only), per
-//   level, per region where applicable.
+//   Every division shows BOTH position-based seed tables (official,
+//   unless the team record is the official seeding for that level —
+//   see teamIsOfficialSeeding above) AND a team-record table, per
+//   level, per region where applicable. Orange Ball additionally shows
+//   one combined team-record table across all 7 teams.
 // ------------------------------------------------------------
 
 function renderSeeds(standingsBySpot) {
@@ -799,6 +812,13 @@ function renderSeeds(standingsBySpot) {
       renderTeamRecordTable(varsityContainer, currentDivision, "varsity", teamList, regionName);
       renderTeamRecordTable(jvContainer, currentDivision, "jv", teamList, regionName);
     });
+
+    // Also show one combined team record across every team in the
+    // division, since the regular season was played as one group even
+    // though the tournament bracket splits by region.
+    const allTeams = divisions[currentDivision];
+    renderTeamRecordTable(varsityContainer, currentDivision, "varsity", allTeams, "Combined (All Regions)");
+    renderTeamRecordTable(jvContainer, currentDivision, "jv", allTeams, "Combined (All Regions)");
     return;
   }
 
@@ -1015,10 +1035,10 @@ function formatTrueTies(ties) {
 }
 
 // ==================================================================
-// TEAM RECORD (informational only — NOT used for official seeding
-// anywhere). A "team match" is decided by whichever team wins more of
-// that level's spots on a given day. Shown for every division as a
-// bonus stat alongside the position-based seeding above.
+// TEAM RECORD — informational for most division/level combos, but the
+// OFFICIAL seeding for any combo listed in teamIsOfficialSeeding above
+// (currently High School Varsity). A "team match" is decided by
+// whichever team wins more of that level's spots on a given day.
 //   Tiebreak order: win % -> head-to-head (round robin) -> spot
 //   differential -> total spots won -> true tie if still equal
 // ==================================================================
@@ -1152,9 +1172,10 @@ function renderTeamRecordTable(container, division, level, teamList, regionLabel
   const wrapper = document.createElement("div");
   wrapper.className = "table-wrapper";
 
-  const baseTitle = level === "varsity"
-    ? "Varsity Team Record (info only — not used for seeding)"
-    : "JV Team Record (info only — not used for seeding)";
+  const infoOnly = !isTeamOfficialSeeding(division, level);
+  const baseTitle = infoOnly
+    ? (level === "varsity" ? "Varsity Team Record (info only — not used for seeding)" : "JV Team Record (info only — not used for seeding)")
+    : (level === "varsity" ? "Varsity Team Seeds" : "JV Team Seeds");
 
   const title = document.createElement("div");
   title.textContent = regionLabel ? `${regionLabel} — ${baseTitle}` : baseTitle;
@@ -1512,9 +1533,12 @@ function saveImportedMatches(importList) {
 // EXPORT ALL SEEDS TO EXCEL
 //   One workbook, one tab per division. Every division's tab gets,
 //   per region where applicable:
-//     - Varsity + JV Position Seeds (official seeding, per spot)
+//     - Varsity + JV Position Seeds (per-spot seeding)
 //     - Varsity + JV Position Record (win-loss grid per spot)
-//     - Varsity + JV Team Record (info only — not used for seeding)
+//     - Varsity + JV Team Record (labeled "Team Seeds" where it's the
+//       official seeding — currently HS Varsity — otherwise "info only")
+//   Orange Ball additionally gets one combined Team Record block across
+//   all 7 teams, after its 2 per-region Team Record blocks.
 // ==================================================================
 
 function ordinalLabel(n) {
@@ -1618,6 +1642,14 @@ function buildTeamStandingsBlock(division, level, heading, teamList) {
   return rows;
 }
 
+function teamRecordHeading(division, level, prefix) {
+  const label = level === "varsity" ? "Varsity" : "JV";
+  const base = isTeamOfficialSeeding(division, level)
+    ? `${label} Team Seeds`
+    : `${label} Team Record (info only)`;
+  return prefix ? `${prefix} — ${base}` : base;
+}
+
 function buildDivisionSheetAOA(division) {
   const regions = getRegionsForDivision(division);
 
@@ -1630,9 +1662,18 @@ function buildDivisionSheetAOA(division) {
         .concat(buildSeedBlock(division, "jv", `${regionName} — JV Position Seeds`, teamList))
         .concat(buildRegionRecordBlock(division, "varsity", `${regionName} — Varsity Position Record`, teamList))
         .concat(buildRegionRecordBlock(division, "jv", `${regionName} — JV Position Record`, teamList))
-        .concat(buildTeamStandingsBlock(division, "varsity", `${regionName} — Varsity Team Record (info only)`, teamList))
-        .concat(buildTeamStandingsBlock(division, "jv", `${regionName} — JV Team Record (info only)`, teamList));
+        .concat(buildTeamStandingsBlock(division, "varsity", teamRecordHeading(division, "varsity", regionName), teamList))
+        .concat(buildTeamStandingsBlock(division, "jv", teamRecordHeading(division, "jv", regionName), teamList));
     });
+
+    // Combined team record across all teams in the division (the regular
+    // season was played as one group even though the tournament bracket
+    // splits by region).
+    const allTeams = divisions[division];
+    rows = rows
+      .concat(buildTeamStandingsBlock(division, "varsity", teamRecordHeading(division, "varsity", "Combined (All Regions)"), allTeams))
+      .concat(buildTeamStandingsBlock(division, "jv", teamRecordHeading(division, "jv", "Combined (All Regions)"), allTeams));
+
     return rows;
   }
 
@@ -1642,8 +1683,8 @@ function buildDivisionSheetAOA(division) {
     .concat(buildSeedBlock(division, "jv", "JV Position Seeds", teamList))
     .concat(buildRegionRecordBlock(division, "varsity", "Varsity Position Record", teamList))
     .concat(buildRegionRecordBlock(division, "jv", "JV Position Record", teamList))
-    .concat(buildTeamStandingsBlock(division, "varsity", "Varsity Team Record (info only)", teamList))
-    .concat(buildTeamStandingsBlock(division, "jv", "JV Team Record (info only)", teamList));
+    .concat(buildTeamStandingsBlock(division, "varsity", teamRecordHeading(division, "varsity", null), teamList))
+    .concat(buildTeamStandingsBlock(division, "jv", teamRecordHeading(division, "jv", null), teamList));
 }
 
 function exportAllSeedsToExcel() {
