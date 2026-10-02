@@ -57,17 +57,10 @@ const divisionFormats = {
   ]
 };
 
-// Divisions that seed by TEAM record (most spots won that day) instead of
-// seeding each spot separately. Currently just High School.
-const teamTournamentDivisions = ["High School"];
-
-function isTeamTournamentDivision(division) {
-  return teamTournamentDivisions.includes(division);
-}
-
 // Divisions split into separate regions for seeding purposes. Standings,
-// tiebreakers, and the Excel export are all computed per region — a match
-// only counts toward a region's standings if BOTH teams are in that region.
+// tiebreakers, team records, and the Excel export are all computed per
+// region — a match only counts toward a region's standings if BOTH teams
+// are in that region.
 const divisionRegions = {
   "Orange Ball": {
     "Region 1": ["Bountiful Orange", "Farmington Orange", "Kaysville Orange", "Layton Orange"],
@@ -662,12 +655,12 @@ function onClearAll() {
 }
 
 // ==================================================================
-// PER-SPOT STANDINGS + SEEDING (MS Boys, MS Girls, Orange Ball)
-//   teamList is optional — defaults to the whole division's team list.
-//   Orange Ball passes a REGION's team list instead, so a match only
-//   counts if both teams are in that region (any other match is
-//   automatically skipped since the region's table won't have an
-//   entry for a team outside it).
+// PER-SPOT (POSITION) STANDINGS + SEEDING — official seeding for every
+// division. teamList is optional and defaults to the whole division's
+// team list; Orange Ball passes a REGION's team list instead, so a
+// match only counts if both teams are in that region (any other match
+// is automatically skipped since the region's table won't have an
+// entry for a team outside it).
 // ==================================================================
 
 function computeStandingsBySpot() {
@@ -783,7 +776,10 @@ function computeOverallRecordByLevel(division, level, teamList) {
 }
 
 // ------------------------------------------------------------
-// Rendering the on-screen seed tables
+// Rendering the on-screen tables
+//   Every division shows BOTH position-based seed tables (official)
+//   AND a team-record table underneath (informational only), per
+//   level, per region where applicable.
 // ------------------------------------------------------------
 
 function renderSeeds(standingsBySpot) {
@@ -793,14 +789,6 @@ function renderSeeds(standingsBySpot) {
   varsityContainer.innerHTML = "";
   jvContainer.innerHTML = "";
 
-  // High School (and any future "team tournament" division) gets a totally
-  // different seed table — see the TEAM TOURNAMENT SEEDING section below.
-  if (isTeamTournamentDivision(currentDivision)) {
-    renderTeamSeedsTable(varsityContainer, "varsity");
-    renderTeamSeedsTable(jvContainer, "jv");
-    return;
-  }
-
   const regions = getRegionsForDivision(currentDivision);
 
   if (regions) {
@@ -808,15 +796,21 @@ function renderSeeds(standingsBySpot) {
       const teamList = regions[regionName];
       const regionStandings = computeStandingsBySpotForDivision(currentDivision, teamList);
       renderSpotSeedTables(regionStandings, currentDivision, teamList, varsityContainer, jvContainer, regionName);
+      renderTeamRecordTable(varsityContainer, currentDivision, "varsity", teamList, regionName);
+      renderTeamRecordTable(jvContainer, currentDivision, "jv", teamList, regionName);
     });
     return;
   }
 
-  renderSpotSeedTables(standingsBySpot, currentDivision, divisions[currentDivision], varsityContainer, jvContainer, null);
+  const teamList = divisions[currentDivision];
+  renderSpotSeedTables(standingsBySpot, currentDivision, teamList, varsityContainer, jvContainer, null);
+  renderTeamRecordTable(varsityContainer, currentDivision, "varsity", teamList, null);
+  renderTeamRecordTable(jvContainer, currentDivision, "jv", teamList, null);
 }
 
-// Builds the per-spot seed tables for one set of standings (one division,
-// or one region within a division) and appends them to the given containers.
+// Builds the per-spot (position) seed tables for one set of standings (one
+// division, or one region within a division) and appends them to the
+// given containers.
 function renderSpotSeedTables(standingsBySpot, division, teamList, varsityContainer, jvContainer, regionLabel) {
   divisionFormats[division].forEach(spotId => {
     const data = standingsBySpot[spotId];
@@ -914,7 +908,7 @@ function renderSpotSeedTables(standingsBySpot, division, teamList, varsityContai
 }
 
 // ==================================================================
-// TIE BREAK RULES (per-spot seeding)
+// TIE BREAK RULES (position seeding)
 //   Order: win % -> head-to-head within tied group (round robin,
 //   rematches included) -> game differential -> total games won ->
 //   overall same-level record -> true tie if still equal
@@ -1021,19 +1015,23 @@ function formatTrueTies(ties) {
 }
 
 // ==================================================================
-// TEAM TOURNAMENT SEEDING (High School — team record, not per-spot)
-//   A dual match winner = whichever team wins more of that level's
-//   spots that day. Teams are then seeded by their team-match record.
+// TEAM RECORD (informational only — NOT used for official seeding
+// anywhere). A "team match" is decided by whichever team wins more of
+// that level's spots on a given day. Shown for every division as a
+// bonus stat alongside the position-based seeding above.
 //   Tiebreak order: win % -> head-to-head (round robin) -> spot
 //   differential -> total spots won -> true tie if still equal
 // ==================================================================
 
-function computeTeamMatchResults(division, level) {
+function computeTeamMatchResults(division, level, teamList) {
+  const teams = teamList || divisions[division];
   const spotIds = divisionFormats[division].filter(
     id => spotDefinitions[id].level === level
   );
 
-  const filteredMatches = matches.filter(m => m.division === division);
+  const filteredMatches = matches.filter(
+    m => m.division === division && teams.includes(m.teamA) && teams.includes(m.teamB)
+  );
 
   return filteredMatches.map(match => {
     let countA = 0;
@@ -1054,11 +1052,12 @@ function computeTeamMatchResults(division, level) {
   });
 }
 
-function computeTeamStandings(division, level) {
-  const teamMatches = computeTeamMatchResults(division, level);
+function computeTeamStandings(division, level, teamList) {
+  const teams = teamList || divisions[division];
+  const teamMatches = computeTeamMatchResults(division, level, teams);
   const table = {};
 
-  divisions[division].forEach(team => {
+  teams.forEach(team => {
     table[team] = { team, wins: 0, losses: 0, ties: 0, spotsWon: 0, spotsLost: 0, headToHead: {} };
   });
 
@@ -1141,8 +1140,10 @@ function sortTeamStandingsWithTiebreaks(teams) {
   return { ordered: finalOrder, trueTies: allTies };
 }
 
-function renderTeamSeedsTable(container, level) {
-  const table = computeTeamStandings(currentDivision, level);
+// Renders one division's (or one region's) team-record table for one
+// level and appends it to the given container.
+function renderTeamRecordTable(container, division, level, teamList, regionLabel) {
+  const table = computeTeamStandings(division, level, teamList);
   const activeTeams = Object.values(table).filter(t => t.wins > 0 || t.losses > 0 || t.ties > 0);
   if (activeTeams.length === 0) return;
 
@@ -1151,8 +1152,12 @@ function renderTeamSeedsTable(container, level) {
   const wrapper = document.createElement("div");
   wrapper.className = "table-wrapper";
 
+  const baseTitle = level === "varsity"
+    ? "Varsity Team Record (info only — not used for seeding)"
+    : "JV Team Record (info only — not used for seeding)";
+
   const title = document.createElement("div");
-  title.textContent = level === "varsity" ? "Varsity Team Standings" : "JV Team Standings";
+  title.textContent = regionLabel ? `${regionLabel} — ${baseTitle}` : baseTitle;
   title.style.fontWeight = "600";
   title.style.marginTop = "0.5rem";
   wrapper.appendChild(title);
@@ -1505,13 +1510,11 @@ function saveImportedMatches(importList) {
 
 // ==================================================================
 // EXPORT ALL SEEDS TO EXCEL
-//   One workbook, one tab per division:
-//     - Team-tournament divisions (High School): Varsity + JV team
-//       standings blocks
-//     - Regioned divisions (Orange Ball): the per-spot blocks below,
-//       repeated once per region
-//     - Other per-spot divisions (MS Boys/Girls): Varsity + JV seed
-//       grids, then Varsity + JV "region record" grids
+//   One workbook, one tab per division. Every division's tab gets,
+//   per region where applicable:
+//     - Varsity + JV Position Seeds (official seeding, per spot)
+//     - Varsity + JV Position Record (win-loss grid per spot)
+//     - Varsity + JV Team Record (info only — not used for seeding)
 // ==================================================================
 
 function ordinalLabel(n) {
@@ -1600,8 +1603,8 @@ function buildRegionRecordBlock(division, level, heading, teamList) {
   return rows;
 }
 
-function buildTeamStandingsBlock(division, level, heading) {
-  const table = computeTeamStandings(division, level);
+function buildTeamStandingsBlock(division, level, heading, teamList) {
+  const table = computeTeamStandings(division, level, teamList);
   const activeTeams = Object.values(table).filter(t => t.wins > 0 || t.losses > 0 || t.ties > 0);
   const { ordered } = sortTeamStandingsWithTiebreaks(activeTeams);
 
@@ -1616,32 +1619,31 @@ function buildTeamStandingsBlock(division, level, heading) {
 }
 
 function buildDivisionSheetAOA(division) {
-  if (isTeamTournamentDivision(division)) {
-    const varsityBlock = buildTeamStandingsBlock(division, "varsity", "Varsity Team Standings");
-    const jvBlock = buildTeamStandingsBlock(division, "jv", "JV Team Standings");
-    return varsityBlock.concat(jvBlock);
-  }
-
   const regions = getRegionsForDivision(division);
 
   if (regions) {
     let rows = [];
     Object.keys(regions).forEach(regionName => {
       const teamList = regions[regionName];
-      rows = rows.concat(buildSeedBlock(division, "varsity", `${regionName} — Varsity`, teamList));
-      rows = rows.concat(buildSeedBlock(division, "jv", `${regionName} — JV`, teamList));
-      rows = rows.concat(buildRegionRecordBlock(division, "varsity", `${regionName} — Varsity Region Record`, teamList));
-      rows = rows.concat(buildRegionRecordBlock(division, "jv", `${regionName} — JV Region Record`, teamList));
+      rows = rows
+        .concat(buildSeedBlock(division, "varsity", `${regionName} — Varsity Position Seeds`, teamList))
+        .concat(buildSeedBlock(division, "jv", `${regionName} — JV Position Seeds`, teamList))
+        .concat(buildRegionRecordBlock(division, "varsity", `${regionName} — Varsity Position Record`, teamList))
+        .concat(buildRegionRecordBlock(division, "jv", `${regionName} — JV Position Record`, teamList))
+        .concat(buildTeamStandingsBlock(division, "varsity", `${regionName} — Varsity Team Record (info only)`, teamList))
+        .concat(buildTeamStandingsBlock(division, "jv", `${regionName} — JV Team Record (info only)`, teamList));
     });
     return rows;
   }
 
-  const varsitySeedBlock = buildSeedBlock(division, "varsity", "Varsity", divisions[division]);
-  const jvSeedBlock = buildSeedBlock(division, "jv", "JV", divisions[division]);
-  const varsityRecordBlock = buildRegionRecordBlock(division, "varsity", "Varsity Region Record", divisions[division]);
-  const jvRecordBlock = buildRegionRecordBlock(division, "jv", "JV Region Record", divisions[division]);
+  const teamList = divisions[division];
 
-  return varsitySeedBlock.concat(jvSeedBlock).concat(varsityRecordBlock).concat(jvRecordBlock);
+  return buildSeedBlock(division, "varsity", "Varsity Position Seeds", teamList)
+    .concat(buildSeedBlock(division, "jv", "JV Position Seeds", teamList))
+    .concat(buildRegionRecordBlock(division, "varsity", "Varsity Position Record", teamList))
+    .concat(buildRegionRecordBlock(division, "jv", "JV Position Record", teamList))
+    .concat(buildTeamStandingsBlock(division, "varsity", "Varsity Team Record (info only)", teamList))
+    .concat(buildTeamStandingsBlock(division, "jv", "JV Team Record (info only)", teamList));
 }
 
 function exportAllSeedsToExcel() {
